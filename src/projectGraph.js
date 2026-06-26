@@ -37,14 +37,14 @@ export function kindOf(name) {
 }
 
 /* ---------- path helpers (POSIX, repo-absolute like "/src/store.js") ---------- */
-function dirname(p) {
+export function dirname(p) {
   const i = p.lastIndexOf('/')
   return i <= 0 ? '/' : p.slice(0, i)
 }
-function basename(p) {
+export function basename(p) {
   return p.slice(p.lastIndexOf('/') + 1)
 }
-function joinPath(dir, rel) {
+export function joinPath(dir, rel) {
   const parts = `${dir}/${rel}`.split('/')
   const stack = []
   for (const part of parts) {
@@ -56,7 +56,7 @@ function joinPath(dir, rel) {
 }
 
 const EXT_CANDIDATES = ['', '.js', '.jsx', '.ts', '.tsx', '.css', '/index.js', '/index.jsx', '/index.ts', '/index.tsx']
-function resolveImport(fromPath, spec, allPaths) {
+export function resolveImport(fromPath, spec, allPaths) {
   if (!spec.startsWith('.')) return null // bare/node_modules import → not a directory file
   const base = joinPath(dirname(fromPath), spec)
   for (const ext of EXT_CANDIDATES) {
@@ -67,7 +67,7 @@ function resolveImport(fromPath, spec, allPaths) {
 }
 
 const IMPORT_RE = /(?:import\s+[^'"]*from\s*|import\s*|require\s*\(\s*|import\s*\(\s*)['"]([^'"]+)['"]/g
-function parseImports(source) {
+export function parseImports(source) {
   const specs = []
   let m
   while ((m = IMPORT_RE.exec(source)) !== null) specs.push(m[1])

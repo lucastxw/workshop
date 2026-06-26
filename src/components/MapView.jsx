@@ -74,6 +74,7 @@ function Flow() {
   const projectFolders = useStore((s) => s.projectFolders)
   const projectEdges = useStore((s) => s.projectEdges)
   const selectedProjectFileId = useStore((s) => s.selectedProjectFileId)
+  const projectFolderFilter = useStore((s) => s.projectFolderFilter)
   const selectProjectFile = useStore((s) => s.selectProjectFile)
   const clearProjectSelection = useStore((s) => s.clearProjectSelection)
 
@@ -220,6 +221,7 @@ function Flow() {
     const out = []
     // folder clusters (background)
     for (const fld of Object.values(projectFolders)) {
+      if (projectFolderFilter && fld.id !== projectFolderFilter) continue
       out.push({
         id: `${fld.id}::cluster`,
         type: 'cluster',
@@ -233,21 +235,30 @@ function Flow() {
     }
     // files
     for (const f of Object.values(projectFiles)) {
+      if (projectFolderFilter && f.folder !== projectFolderFilter) continue
       out.push({ id: f.id, type: 'projectFile', position: f.position, data: f, zIndex: 2 })
     }
     return out
-  }, [projectFiles, projectFolders])
+  }, [projectFiles, projectFolders, projectFolderFilter])
 
   const projectFlowEdges = useMemo(() => {
+    const visibleIds = new Set(
+      Object.values(projectFiles)
+        .filter((f) => !projectFolderFilter || f.folder === projectFolderFilter)
+        .map((f) => f.id),
+    )
+    if (projectFolderFilter && !visibleIds.has(selectedProjectFileId)) return []
     const focus = getProjectFocus({ selectedProjectFileId, projectEdges })
     if (!focus) return []
     const E = []
-    // selection → things it affects (arrow exits selection's RIGHT, enters target's LEFT)
-    focus.downstream.forEach((t, i) => E.push(makeEdge(focus.id, t, DOWNSTREAM_COLOR, { lane: i, bow: 'down' })))
-    // things that affect selection → selection (arrow exits their RIGHT, enters selection's LEFT)
-    focus.upstream.forEach((srcId, i) => E.push(makeEdge(srcId, focus.id, UPSTREAM_COLOR, { lane: i, bow: 'up' })))
+    focus.downstream
+      .filter((t) => visibleIds.has(t))
+      .forEach((t, i) => E.push(makeEdge(focus.id, t, DOWNSTREAM_COLOR, { lane: i, bow: 'down' })))
+    focus.upstream
+      .filter((srcId) => visibleIds.has(srcId))
+      .forEach((srcId, i) => E.push(makeEdge(srcId, focus.id, UPSTREAM_COLOR, { lane: i, bow: 'up' })))
     return E
-  }, [selectedProjectFileId, projectEdges])
+  }, [selectedProjectFileId, projectEdges, projectFiles, projectFolderFilter])
 
   const nodes = isProject ? projectNodes : functionNodes
   const edges = isProject ? projectFlowEdges : functionEdges
@@ -300,7 +311,10 @@ function Flow() {
     if (!q) return []
     const res = []
     if (isProject) {
-      for (const f of Object.values(projectFiles)) if (f.name.toLowerCase().includes(q)) res.push({ id: f.id, label: f.name, kind: 'file' })
+      for (const f of Object.values(projectFiles)) {
+        if (projectFolderFilter && f.folder !== projectFolderFilter) continue
+        if (f.name.toLowerCase().includes(q)) res.push({ id: f.id, label: f.name, kind: 'file' })
+      }
     } else {
       for (const f of Object.values(functions)) if (f.name.toLowerCase().includes(q)) res.push({ id: f.id, label: f.name, kind: 'fn' })
       for (const f of Object.values(files)) if (f.name.toLowerCase().includes(q)) res.push({ id: f.id, label: f.name, kind: 'file' })

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { buildProjectGraph, FILE_SOURCE } from './projectGraph'
+import { buildProjectGraph, FILE_SOURCE, kindOf, dirname, parseImports, resolveImport } from './projectGraph'
 
 /* =============================================================================
  *  GEOMETRY CONSTANTS
@@ -108,10 +108,94 @@ export const useStore = create((set, get) => ({
   projectFolders: projectGraph.folders,
   projectEdges: projectGraph.edges, // [{ source, target }] = source imports/affects target
   selectedProjectFileId: null,
+  projectFolderFilter: null,
 
   setViewMode: (mode) => set({ viewMode: mode, focusedNodeId: null, selectedProjectFileId: null }),
   selectProjectFile: (id) => set({ selectedProjectFileId: id }),
   clearProjectSelection: () => set({ selectedProjectFileId: null }),
+  setProjectFolderFilter: (folder) => set({ projectFolderFilter: folder }),
+  clearProjectFolderFilter: () => set({ projectFolderFilter: null }),
+
+  addProjectFiles: (newFiles) =>
+    set((state) => {
+      const projectFiles = { ...state.projectFiles }
+      const projectFolders = { ...state.projectFolders }
+      const projectEdges = [...state.projectEdges]
+      const allPaths = new Set(Object.keys(projectFiles))
+
+      // Place imported files in a visible area with simple layout.
+      const folderCounts = Object.values(projectFiles).reduce((acc, file) => {
+        acc[file.folder] = (acc[file.folder] || 0) + 1
+        return acc
+      }, {})
+
+      for (const file of newFiles) {
+        if (projectFiles[file.path]) continue
+        const folder = file.folder || dirname(file.path)
+        const existingFolderCount = folderCounts[folder] || 0
+        const nodeX = 920 + existingFolderCount * 220
+        const nodeY = 120 + (Object.keys(projectFiles).length % 6) * 120
+
+        projectFiles[file.path] = {
+          id: file.path,
+          path: file.path,
+          name: file.name,
+          folder,
+          kind: file.kind,
+          position: file.position || { x: nodeX, y: nodeY },
+          url: file.url || null,
+          source: file.source || null,
+        }
+
+        allPaths.add(file.path)
+        folderCounts[folder] = existingFolderCount + 1
+
+        if (!projectFolders[folder]) {
+          projectFolders[folder] = {
+            id: folder,
+            name: folder === '/' ? 'project root' : folder,
+            position: { x: Object.keys(projectFolders).length * 940, y: 0 },
+            size: { width: 380, height: 240 },
+          }
+        }
+      }
+
+      for (const path of Object.keys(projectFiles)) {
+        const file = projectFiles[path]
+        if (file.kind !== 'text') continue
+        const source = file.source ?? FILE_SOURCE[path]
+        if (typeof source !== 'string') continue
+        for (const spec of parseImports(source)) {
+          const target = resolveImport(path, spec, allPaths)
+          if (!target || target === path) continue
+          if (!projectEdges.some((e) => e.source === path && e.target === target)) {
+            projectEdges.push({ source: path, target })
+          }
+        }
+      }
+
+      return { projectFiles, projectFolders, projectEdges }
+    }),
+  deleteProjectFile: (id) =>
+    set((state) => {
+      const projectFiles = { ...state.projectFiles }
+      const projectFolders = { ...state.projectFolders }
+      const projectEdges = state.projectEdges.filter((e) => e.source !== id && e.target !== id)
+
+      delete projectFiles[id]
+      const folder = state.projectFiles[id]?.folder
+      if (folder) {
+        const stillInFolder = Object.values(projectFiles).some((file) => file.folder === folder)
+        if (!stillInFolder) delete projectFolders[folder]
+      }
+
+      return {
+        projectFiles,
+        projectFolders,
+        projectEdges,
+        selectedProjectFileId: state.selectedProjectFileId === id ? null : state.selectedProjectFileId,
+      }
+    }),
 
   // --- floating text editor / asset viewer ---
   editorFileId: null, // project file currently open in the floating panel
@@ -300,5 +384,7 @@ export function getProjectFocus(state) {
  * otherwise the original source pulled at build time. */
 export function getFileContent(state, path) {
   if (path in state.fileEdits) return state.fileEdits[path]
+  const projectFile = state.projectFiles?.[path]
+  if (projectFile?.source) return projectFile.source
   return FILE_SOURCE[path] ?? ''
 }
