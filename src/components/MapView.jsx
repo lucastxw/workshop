@@ -111,6 +111,18 @@ function Flow() {
     return () => clearTimeout(t)
   }, [viewMode, rf])
 
+  /* ---------- global Escape handler to exit focus / selection ---------- */
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape') return
+      clearFocus()
+      clearProjectSelection()
+      setMenu(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [clearFocus, clearProjectSelection])
+
   /* ---------- imperative pan/zoom when something requests focus ---------- */
   useEffect(() => {
     if (!pendingFocus) return
@@ -392,7 +404,7 @@ function Flow() {
         className="bg-canvas"
       >
         <Background variant={BackgroundVariant.Dots} gap={26} size={1.5} color="#1e2533" />
-        <Controls className="!bg-slate-900 !border-slate-700" showInteractive={false} />
+        <Controls position="top-right" className="!bg-slate-900 !border-slate-700" showInteractive={false} />
         <MiniMap
           pannable
           zoomable
