@@ -1,6 +1,31 @@
 import { create } from 'zustand'
 import { buildProjectGraph, FILE_SOURCE, kindOf, dirname, parseImports, resolveImport } from './projectGraph'
 
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+function findAvailableProjectPosition(occupiedRects, startX = 920, startY = 120) {
+  const GRID_W = 220
+  const GRID_H = 120
+  const NODE_W = 178
+  const NODE_H = 64
+
+  const usedRight = occupiedRects.reduce((max, rect) => Math.max(max, rect.x + rect.w), 0)
+  const dedicatedStartX = Math.max(startX, usedRight + 260)
+
+  // Use a simple grid scan to find the first non-overlapping slot in an import cluster region.
+  for (let row = 0; row < 12; row += 1) {
+    for (let col = 0; col < 8; col += 1) {
+      const candidate = { x: dedicatedStartX + col * GRID_W, y: startY + row * GRID_H, w: NODE_W, h: NODE_H }
+      const collides = occupiedRects.some((rect) => rectsOverlap(rect, candidate))
+      if (!collides) return { x: candidate.x, y: candidate.y }
+    }
+  }
+
+  return { x: dedicatedStartX, y: startY }
+}
+
 /* =============================================================================
  *  GEOMETRY CONSTANTS
  *  Functions are children of File nodes; their `position` is relative to the
@@ -122,19 +147,16 @@ export const useStore = create((set, get) => ({
       const projectFolders = { ...state.projectFolders }
       const projectEdges = [...state.projectEdges]
       const allPaths = new Set(Object.keys(projectFiles))
-
-      // Place imported files in a visible area with simple layout.
-      const folderCounts = Object.values(projectFiles).reduce((acc, file) => {
-        acc[file.folder] = (acc[file.folder] || 0) + 1
-        return acc
-      }, {})
+      const occupiedRects = [
+        ...Object.values(projectFiles).map((file) => ({ x: file.position.x, y: file.position.y, w: 178, h: 64 })),
+        ...Object.values(projectFolders).map((folder) => ({ x: folder.position.x, y: folder.position.y, w: folder.size.width, h: folder.size.height })),
+        ...Object.values(state.subspaces).map((subspace) => ({ x: subspace.position.x, y: subspace.position.y, w: subspace.size.width, h: subspace.size.height })),
+      ]
 
       for (const file of newFiles) {
         if (projectFiles[file.path]) continue
         const folder = file.folder || dirname(file.path)
-        const existingFolderCount = folderCounts[folder] || 0
-        const nodeX = 920 + existingFolderCount * 220
-        const nodeY = 120 + (Object.keys(projectFiles).length % 6) * 120
+        const position = file.position || findAvailableProjectPosition(occupiedRects)
 
         projectFiles[file.path] = {
           id: file.path,
@@ -142,13 +164,13 @@ export const useStore = create((set, get) => ({
           name: file.name,
           folder,
           kind: file.kind,
-          position: file.position || { x: nodeX, y: nodeY },
+          position,
           url: file.url || null,
           source: file.source || null,
         }
 
         allPaths.add(file.path)
-        folderCounts[folder] = existingFolderCount + 1
+        occupiedRects.push({ x: position.x, y: position.y, w: 178, h: 64 })
 
         if (!projectFolders[folder]) {
           projectFolders[folder] = {
