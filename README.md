@@ -1,1 +1,1 @@
-# ProjectBlueprint
+# ProjectBlueprint / Workshop
