@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { buildProjectGraph } from './projectGraph'
 
 /* =============================================================================
  *  GEOMETRY CONSTANTS
@@ -86,6 +87,10 @@ const initialBookmarks = [
   { id: 'bm-db', name: 'Data layer', viewport: { x: -160, y: -360, zoom: 1 }, focusObjectId: 'fn-query', temporary: false },
 ]
 
+/* Real directory + dependency graph, derived from the actual files on disk
+ * (see projectGraph.js). This is the data behind the "Project Map" view. */
+const projectGraph = buildProjectGraph()
+
 /* =============================================================================
  *  STORE
  * ========================================================================== */
@@ -96,6 +101,17 @@ export const useStore = create((set, get) => ({
   subspaces: initialSubspaces,
   tunables: initialTunables,
   bookmarks: initialBookmarks,
+
+  // --- Project Map (real directory) ---
+  viewMode: 'project', // 'project' (real directory) | 'functions' (mock spatial demo)
+  projectFiles: projectGraph.files,
+  projectFolders: projectGraph.folders,
+  projectEdges: projectGraph.edges, // [{ source, target }] = source imports/affects target
+  selectedProjectFileId: null,
+
+  setViewMode: (mode) => set({ viewMode: mode, focusedNodeId: null, selectedProjectFileId: null }),
+  selectProjectFile: (id) => set({ selectedProjectFileId: id }),
+  clearProjectSelection: () => set({ selectedProjectFileId: null }),
 
   // --- interaction state ---
   focusedNodeId: null, // currently focused FUNCTION id (drives ports/edges/dimming)
@@ -138,6 +154,9 @@ export const useStore = create((set, get) => ({
       }
       if (state.tunables[id]) {
         return { tunables: { ...state.tunables, [id]: { ...state.tunables[id], position } } }
+      }
+      if (state.projectFiles[id]) {
+        return { projectFiles: { ...state.projectFiles, [id]: { ...state.projectFiles[id], position } } }
       }
       return {}
     }),
@@ -245,4 +264,21 @@ export function getFocusGraph(state) {
     }
   }
   return { fileId, focusedNodeId, internalUpstream, internalDownstream, leftPorts, rightPorts }
+}
+
+/* PROJECT MAP focus: given the selected file, split its dependency edges into
+ *   downstream = files this file affects/imports  (arrow exits selected's RIGHT)
+ *   upstream   = files that affect/import this one (arrow enters selected's LEFT)
+ * plus a `neighbors` set used to dim everything uninvolved. */
+export function getProjectFocus(state) {
+  const { selectedProjectFileId, projectEdges } = state
+  if (!selectedProjectFileId) return null
+  const downstream = []
+  const upstream = []
+  for (const e of projectEdges) {
+    if (e.source === selectedProjectFileId) downstream.push(e.target)
+    if (e.target === selectedProjectFileId) upstream.push(e.source)
+  }
+  const neighbors = new Set([selectedProjectFileId, ...downstream, ...upstream])
+  return { id: selectedProjectFileId, downstream, upstream, neighbors }
 }

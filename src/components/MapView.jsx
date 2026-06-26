@@ -10,12 +10,14 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 
-import { useStore, getFileSize, getFocusGraph, FN, FILE, PORT, FILE_COLORS } from '../store'
+import { useStore, getFileSize, getFocusGraph, getProjectFocus, FN, FILE, PORT, FILE_COLORS } from '../store'
 import SubspaceNode from './nodes/SubspaceNode'
 import FileNode from './nodes/FileNode'
 import FunctionNode from './nodes/FunctionNode'
 import TunableNode from './nodes/TunableNode'
 import PortNode from './nodes/PortNode'
+import ClusterNode from './nodes/ClusterNode'
+import ProjectFileNode from './nodes/ProjectFileNode'
 
 const nodeTypes = {
   subspace: SubspaceNode,
@@ -23,7 +25,12 @@ const nodeTypes = {
   function: FunctionNode,
   tunable: TunableNode,
   port: PortNode,
+  cluster: ClusterNode,
+  projectFile: ProjectFileNode,
 }
+
+const DOWNSTREAM_COLOR = '#34d399' // selection AFFECTS these (arrow exits selection's right)
+const UPSTREAM_COLOR = '#f59e0b' // these AFFECT the selection (arrow enters selection's left)
 
 /* ---------- helpers ---------- */
 function makeEdge(source, target, color) {
@@ -45,7 +52,11 @@ function Flow() {
   const rf = useReactFlow()
   const wrapperRef = useRef(null)
 
-  // --- store slices ---
+  // --- view mode ---
+  const viewMode = useStore((s) => s.viewMode)
+  const setViewMode = useStore((s) => s.setViewMode)
+
+  // --- function-graph (mock) slices ---
   const files = useStore((s) => s.files)
   const functions = useStore((s) => s.functions)
   const subspaces = useStore((s) => s.subspaces)
@@ -53,6 +64,15 @@ function Flow() {
   const calls = useStore((s) => s.calls)
   const focusedNodeId = useStore((s) => s.focusedNodeId)
 
+  // --- project-graph (real directory) slices ---
+  const projectFiles = useStore((s) => s.projectFiles)
+  const projectFolders = useStore((s) => s.projectFolders)
+  const projectEdges = useStore((s) => s.projectEdges)
+  const selectedProjectFileId = useStore((s) => s.selectedProjectFileId)
+  const selectProjectFile = useStore((s) => s.selectProjectFile)
+  const clearProjectSelection = useStore((s) => s.clearProjectSelection)
+
+  // --- shared actions ---
   const moveNode = useStore((s) => s.moveNode)
   const clearFocus = useStore((s) => s.clearFocus)
   const setFocusedNode = useStore((s) => s.setFocusedNode)
@@ -68,6 +88,8 @@ function Flow() {
   const [menu, setMenu] = useState(null) // { x, y, flowPos }
   const [search, setSearch] = useState('')
 
+  const isProject = viewMode === 'project'
+
   /* ---------- expose an imperative bridge for the sidebar (bookmarks) ---------- */
   useEffect(() => {
     setFlowApi({
@@ -76,6 +98,12 @@ function Flow() {
       fitTo: (id, opts) => rf.fitView({ nodes: [{ id }], ...opts }),
     })
   }, [rf, setFlowApi])
+
+  /* ---------- reframe when the view mode changes ---------- */
+  useEffect(() => {
+    const t = setTimeout(() => rf.fitView({ duration: 500, padding: 0.18 }), 60)
+    return () => clearTimeout(t)
+  }, [viewMode, rf])
 
   /* ---------- imperative pan/zoom when something requests focus ---------- */
   useEffect(() => {
@@ -94,12 +122,13 @@ function Flow() {
     consumePendingFocus()
   }, [pendingFocus, rf, subspaces, functions, consumePendingFocus])
 
-  /* ---------- build React Flow nodes from the store ---------- */
-  const nodes = useMemo(() => {
+  /* ===========================================================================
+   *  FUNCTION-GRAPH nodes/edges (mock spatial demo)
+   * ======================================================================== */
+  const functionNodes = useMemo(() => {
     const out = []
     const focus = getFocusGraph({ focusedNodeId, functions, calls })
 
-    // 1) subspaces (translucent background — lowest z)
     for (const sp of Object.values(subspaces)) {
       out.push({
         id: sp.id,
@@ -110,8 +139,6 @@ function Flow() {
         zIndex: 0,
       })
     }
-
-    // 2) files (parents — must precede their children in the array)
     for (const file of Object.values(files)) {
       const size = getFileSize(functions, file.id)
       out.push({
@@ -123,8 +150,6 @@ function Flow() {
         zIndex: 1,
       })
     }
-
-    // 3) function pills (children of files, clamped to parent bounds)
     for (const fn of Object.values(functions)) {
       out.push({
         id: fn.id,
@@ -136,8 +161,6 @@ function Flow() {
         zIndex: 2,
       })
     }
-
-    // 4) dynamic PORTS for the focused function (children of its file)
     if (focus) {
       const size = getFileSize(functions, focus.fileId)
       focus.leftPorts.forEach((p, i) => {
@@ -167,17 +190,13 @@ function Flow() {
         })
       })
     }
-
-    // 5) tunables (standalone squares)
     for (const t of Object.values(tunables)) {
       out.push({ id: t.id, type: 'tunable', position: t.position, data: t, zIndex: 1 })
     }
-
     return out
   }, [files, functions, subspaces, tunables, calls, focusedNodeId])
 
-  /* ---------- build edges from the focus graph ---------- */
-  const edges = useMemo(() => {
+  const functionEdges = useMemo(() => {
     const focus = getFocusGraph({ focusedNodeId, functions, calls })
     if (!focus) return []
     const fid = focus.focusedNodeId
@@ -189,6 +208,45 @@ function Flow() {
     return E
   }, [focusedNodeId, functions, calls])
 
+  /* ===========================================================================
+   *  PROJECT-GRAPH nodes/edges (real directory)
+   * ======================================================================== */
+  const projectNodes = useMemo(() => {
+    const out = []
+    // folder clusters (background)
+    for (const fld of Object.values(projectFolders)) {
+      out.push({
+        id: `${fld.id}::cluster`,
+        type: 'cluster',
+        position: fld.position,
+        data: { name: fld.name, width: fld.size.width, height: fld.size.height },
+        style: { width: fld.size.width, height: fld.size.height, zIndex: 0 },
+        zIndex: 0,
+        selectable: false,
+        draggable: false,
+      })
+    }
+    // files
+    for (const f of Object.values(projectFiles)) {
+      out.push({ id: f.id, type: 'projectFile', position: f.position, data: f, zIndex: 2 })
+    }
+    return out
+  }, [projectFiles, projectFolders])
+
+  const projectFlowEdges = useMemo(() => {
+    const focus = getProjectFocus({ selectedProjectFileId, projectEdges })
+    if (!focus) return []
+    const E = []
+    // selection → things it affects (arrow exits selection's RIGHT, enters target's LEFT)
+    focus.downstream.forEach((t) => E.push(makeEdge(focus.id, t, DOWNSTREAM_COLOR)))
+    // things that affect selection → selection (arrow exits their RIGHT, enters selection's LEFT)
+    focus.upstream.forEach((srcId) => E.push(makeEdge(srcId, focus.id, UPSTREAM_COLOR)))
+    return E
+  }, [selectedProjectFileId, projectEdges])
+
+  const nodes = isProject ? projectNodes : functionNodes
+  const edges = isProject ? projectFlowEdges : functionEdges
+
   /* ---------- drag → persist positions back to the store ---------- */
   const onNodesChange = useCallback(
     (changes) => {
@@ -199,15 +257,22 @@ function Flow() {
     [moveNode],
   )
 
-  /* ---------- context menu ---------- */
+  const onPaneClick = useCallback(() => {
+    clearFocus()
+    clearProjectSelection()
+    setMenu(null)
+  }, [clearFocus, clearProjectSelection])
+
+  /* ---------- context menu (creation — function mode only) ---------- */
   const onPaneContextMenu = useCallback(
     (e) => {
       e.preventDefault()
+      if (isProject) return
       const bounds = wrapperRef.current.getBoundingClientRect()
       const flowPos = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY })
       setMenu({ x: e.clientX - bounds.left, y: e.clientY - bounds.top, flowPos })
     },
-    [rf],
+    [rf, isProject],
   )
 
   const openMenuAtCenter = useCallback(() => {
@@ -229,20 +294,33 @@ function Flow() {
     const q = search.trim().toLowerCase()
     if (!q) return []
     const res = []
-    for (const f of Object.values(functions)) if (f.name.toLowerCase().includes(q)) res.push({ id: f.id, label: f.name, kind: 'fn' })
-    for (const f of Object.values(files)) if (f.name.toLowerCase().includes(q)) res.push({ id: f.id, label: f.name, kind: 'file' })
-    for (const s of Object.values(subspaces)) if (s.name.toLowerCase().includes(q)) res.push({ id: s.id, label: s.name, kind: 'sub' })
+    if (isProject) {
+      for (const f of Object.values(projectFiles)) if (f.name.toLowerCase().includes(q)) res.push({ id: f.id, label: f.name, kind: 'file' })
+    } else {
+      for (const f of Object.values(functions)) if (f.name.toLowerCase().includes(q)) res.push({ id: f.id, label: f.name, kind: 'fn' })
+      for (const f of Object.values(files)) if (f.name.toLowerCase().includes(q)) res.push({ id: f.id, label: f.name, kind: 'file' })
+      for (const s of Object.values(subspaces)) if (s.name.toLowerCase().includes(q)) res.push({ id: s.id, label: s.name, kind: 'sub' })
+    }
     return res.slice(0, 6)
-  }, [search, functions, files, subspaces])
+  }, [search, isProject, projectFiles, functions, files, subspaces])
 
   const gotoResult = (r) => {
-    if (r.kind === 'fn') setFocusedNode(r.id)
+    if (isProject) selectProjectFile(r.id)
+    else if (r.kind === 'fn') setFocusedNode(r.id)
     requestFocus(r.id)
     setSearch('')
   }
 
   return (
     <div ref={wrapperRef} className="relative h-full w-full" onClick={() => setMenu(null)}>
+      {/* ---------- MODE TOGGLE (top-left) ---------- */}
+      <div className="pointer-events-none absolute left-3 top-3 z-20">
+        <div className="pointer-events-auto inline-flex rounded-full border border-slate-700 bg-slate-900/90 p-0.5 text-xs shadow-lg backdrop-blur">
+          <ToggleBtn active={isProject} onClick={() => setViewMode('project')}>📁 Project Map</ToggleBtn>
+          <ToggleBtn active={!isProject} onClick={() => setViewMode('functions')}>◯ Functions</ToggleBtn>
+        </div>
+      </div>
+
       {/* ---------- TOP OVERLAY: search + save view ---------- */}
       <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
         <div className="pointer-events-auto flex items-center gap-2">
@@ -251,7 +329,7 @@ function Flow() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && searchResults[0] && gotoResult(searchResults[0])}
-              placeholder="Search files & functions…"
+              placeholder={isProject ? 'Search files…' : 'Search files & functions…'}
               className="w-80 rounded-full border border-slate-700 bg-slate-900/90 px-4 py-2 text-sm text-slate-100 shadow-lg outline-none backdrop-blur placeholder:text-slate-500 focus:border-indigo-500"
             />
             <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-500">⌕</span>
@@ -264,7 +342,7 @@ function Flow() {
                     className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
                   >
                     <span className="text-[10px] uppercase text-slate-500">{r.kind}</span>
-                    <span className="font-mono">{r.label}</span>
+                    <span className="truncate font-mono">{r.label}</span>
                   </button>
                 ))}
               </div>
@@ -285,9 +363,9 @@ function Flow() {
         edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
-        onPaneClick={() => { clearFocus(); setMenu(null) }}
+        onPaneClick={onPaneClick}
         onPaneContextMenu={onPaneContextMenu}
-        minZoom={0.15}
+        minZoom={0.1}
         maxZoom={3}
         fitView
         proOptions={{ hideAttribution: true }}
@@ -301,19 +379,44 @@ function Flow() {
           maskColor="rgba(2,6,23,0.7)"
           className="!bg-slate-900 !border !border-slate-700"
           nodeColor={(n) =>
-            n.type === 'subspace' ? `${n.data?.color || '#6366f1'}55` : n.type === 'function' ? '#475569' : n.type === 'tunable' ? '#06b6d4' : '#334155'
+            n.type === 'subspace'
+              ? `${n.data?.color || '#6366f1'}55`
+              : n.type === 'cluster'
+              ? '#1e293b'
+              : n.type === 'projectFile'
+              ? '#475569'
+              : n.type === 'function'
+              ? '#475569'
+              : n.type === 'tunable'
+              ? '#06b6d4'
+              : '#334155'
           }
         />
       </ReactFlow>
 
-      {/* ---------- FAB (opens creation menu) ---------- */}
-      <button
-        onClick={openMenuAtCenter}
-        title="Create…"
-        className="absolute bottom-6 right-6 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-2xl text-white shadow-xl shadow-indigo-900/50 transition hover:bg-indigo-500 active:scale-95"
-      >
-        +
-      </button>
+      {/* ---------- PROJECT-MODE LEGEND ---------- */}
+      {isProject && (
+        <div className="pointer-events-none absolute bottom-6 left-6 z-20 rounded-xl border border-slate-700 bg-slate-900/90 px-3 py-2 text-[11px] shadow-lg backdrop-blur">
+          <div className="mb-1 font-semibold text-slate-300">Click a file to trace dependencies</div>
+          <div className="flex items-center gap-2 text-slate-400">
+            <span className="inline-block h-0.5 w-5" style={{ background: DOWNSTREAM_COLOR }} /> affects (imports) →
+          </div>
+          <div className="flex items-center gap-2 text-slate-400">
+            <span className="inline-block h-0.5 w-5" style={{ background: UPSTREAM_COLOR }} /> ← affected by (imported by)
+          </div>
+        </div>
+      )}
+
+      {/* ---------- FAB (creation — function mode only) ---------- */}
+      {!isProject && (
+        <button
+          onClick={openMenuAtCenter}
+          title="Create…"
+          className="absolute bottom-6 right-6 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-2xl text-white shadow-xl shadow-indigo-900/50 transition hover:bg-indigo-500 active:scale-95"
+        >
+          +
+        </button>
+      )}
 
       {/* ---------- CONTEXT MENU ---------- */}
       {menu && (
@@ -338,6 +441,20 @@ function Flow() {
         />
       )}
     </div>
+  )
+}
+
+function ToggleBtn({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        'rounded-full px-3 py-1.5 font-medium transition-colors',
+        active ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200',
+      ].join(' ')}
+    >
+      {children}
+    </button>
   )
 }
 
