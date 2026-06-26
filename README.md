@@ -59,6 +59,20 @@ The headline view reflects the **actual repository**, with no backend and no man
 
 Every uninvolved file fades to low opacity so attention stays on the selected file and its neighbours. The **File Explorer** is mode-aware: in Project Map it lists the real directory, and clicking an entry selects + frames that file on the map.
 
+Edges use a custom [`AroundEdge`](src/components/edges/AroundEdge.jsx) that bows **around** node bodies rather than slicing through them, and gives each sibling edge an increasing "lane" offset so a fan of dependencies stays readable even when nodes are close.
+
+## Opening files: editor & asset viewers
+
+**Double-click** a file node (or single-click won't trigger it — single-click is reserved for dependency tracing) to open a small **floating, draggable panel** ([`FloatingEditor`](src/components/FloatingEditor.jsx)) whose contents depend on the file type:
+
+| File kind | Panel |
+| --------- | ----- |
+| **text / code** (`.js`, `.jsx`, `.css`, `.json`, `.md`, …) | an **editable** code editor showing the real source (pulled via `?raw`). Edits are kept **in-memory** in the store (`fileEdits`) — no backend, so they reset on reload; **Revert** restores the original. |
+| **image** (`.svg`, `.png`, …) | an image viewer (`<img>` from the file's `?url`). Demo node: `src/assets/logo.svg`. |
+| **audio** (`.wav`, `.mp3`, …) | an audio player with a Play button. Demo node: `src/assets/chime.wav`. |
+
+Asset files are enumerated with a second `import.meta.glob(..., { query: '?url' })` so images/audio resolve to servable URLs; [`kindOf`](src/projectGraph.js) classifies each file by extension.
+
 ## The core idea (Functions view): focus → ports
 
 The store holds a flat call list (`source → target`). When you single-click a function,
@@ -92,6 +106,7 @@ exercises every path at once.
 | ------------------------------------- | ------------------------------------------------------------------ |
 | Toggle **📁 Project Map / ◯ Functions** | Switches between the real directory graph and the mock demo       |
 | Click a file in **Project Map**       | Reveals dependency arrows (green = affects, amber = affected-by), dims the rest |
+| **Double-click** a file in Project Map | Opens the floating panel — code editor (text), image viewer, or audio player |
 | Click a file in the Explorer          | Highlights and pans/zooms the map to it                            |
 | Single-click a function               | Focus: dimming, internal edges, dynamic ports                      |
 | Double-click a file (node or list)    | Opens the terminal editor modal (Esc to close)                     |
@@ -107,12 +122,18 @@ src/
 ├─ store.js                 # state + both graphs' logic (start here)
 ├─ projectGraph.js          # builds the REAL directory graph via import.meta.glob
 ├─ App.jsx
+├─ assets/                  # demo non-text nodes
+│  ├─ logo.svg              #   image viewer demo
+│  └─ chime.wav             #   audio player demo
 └─ components/
    ├─ Layout.jsx            # 30/70 split, left column split 50/50
    ├─ FileExplorer.jsx      # mode-aware (real dir | mock files)
    ├─ BookmarkManager.jsx
    ├─ MapView.jsx           # both views: node/edge/port derivation, click logic, search, menu
    ├─ TerminalModal.jsx
+   ├─ FloatingEditor.jsx    # draggable text editor / image / audio panel
+   ├─ edges/
+   │  └─ AroundEdge.jsx     # curved edge that routes around nodes
    └─ nodes/
       ├─ ClusterNode.jsx       # Project Map: folder background
       ├─ ProjectFileNode.jsx   # Project Map: a real file + dependency highlighting

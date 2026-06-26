@@ -3,6 +3,7 @@ import FileExplorer from './FileExplorer'
 import BookmarkManager from './BookmarkManager'
 import MapView from './MapView'
 import TerminalModal from './TerminalModal'
+import FloatingEditor from './FloatingEditor'
 
 /* Top-level layout:
  *   ┌───────────────┬──────────────────────────────┐
@@ -42,6 +43,7 @@ export default function Layout() {
       </PanelGroup>
 
       <TerminalModal />
+      <FloatingEditor />
     </div>
   )
 }

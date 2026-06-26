@@ -2,21 +2,39 @@
  *  PROJECT GRAPH  —  derives a REAL file/dependency graph from the actual
  *  directory, with NO backend.
  *
- *  Vite's `import.meta.glob` enumerates every matching file in the repo at
- *  build time and (with `?raw`) hands us its source text. We parse the real
- *  `import` / `require` statements to build true file→file dependency edges,
- *  then lay the files out in folder clusters.
+ *  • Text files: pulled with `?raw` so we get the source (parsed for imports
+ *    and shown in the floating editor).
+ *  • Asset files (images / audio): pulled with `?url` so we get a servable URL
+ *    for the image viewer / audio player.
  *
- *  → Files in the same folder are grouped into the same translucent cluster.
- *  → edges[i] = { source, target } means `source` imports / affects `target`.
+ *  edges[i] = { source, target } means `source` imports / affects `target`.
  * ========================================================================== */
 
-// Eagerly pull raw source for project files (src tree + root config/docs).
+// Text/source files → raw text.
 const RAW = import.meta.glob(['/src/**/*.{js,jsx,ts,tsx,css}', '/*.{js,json,html,md}'], {
   query: '?raw',
   import: 'default',
   eager: true,
 })
+
+// Binary assets → URLs.
+const ASSETS = import.meta.glob(['/src/**/*.{svg,png,jpg,jpeg,gif,webp,avif,mp3,wav,ogg,m4a,flac}'], {
+  query: '?url',
+  import: 'default',
+  eager: true,
+})
+
+/* Source map exported for the editor (text files only). */
+export const FILE_SOURCE = RAW
+
+const IMAGE_EXT = new Set(['svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'])
+const AUDIO_EXT = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'])
+export function kindOf(name) {
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+  if (IMAGE_EXT.has(ext)) return 'image'
+  if (AUDIO_EXT.has(ext)) return 'audio'
+  return 'text'
+}
 
 /* ---------- path helpers (POSIX, repo-absolute like "/src/store.js") ---------- */
 function dirname(p) {
@@ -37,7 +55,6 @@ function joinPath(dir, rel) {
   return '/' + stack.join('/')
 }
 
-/* Resolve a relative import specifier to a real file path in our set. */
 const EXT_CANDIDATES = ['', '.js', '.jsx', '.ts', '.tsx', '.css', '/index.js', '/index.jsx', '/index.ts', '/index.tsx']
 function resolveImport(fromPath, spec, allPaths) {
   if (!spec.startsWith('.')) return null // bare/node_modules import → not a directory file
@@ -49,7 +66,6 @@ function resolveImport(fromPath, spec, allPaths) {
   return null
 }
 
-/* Pull import sources out of a file's raw text. */
 const IMPORT_RE = /(?:import\s+[^'"]*from\s*|import\s*|require\s*\(\s*|import\s*\(\s*)['"]([^'"]+)['"]/g
 function parseImports(source) {
   const specs = []
@@ -58,33 +74,44 @@ function parseImports(source) {
   return specs
 }
 
-/* ---------- layout constants ---------- */
-const FILE_W = 174
-const FILE_H = 62
-const F_GAP = 16
+/* ---------- layout constants (roomier than before so edges stay legible) ---------- */
+const FILE_W = 178
+const FILE_H = 64
+const F_GAP = 36
 const CLUSTER_COLS = 3
-const LABEL_H = 30
-const C_PAD = 18
-const CLUSTER_GAP = 90
+const LABEL_H = 32
+const C_PAD = 22
+const CLUSTER_GAP = 180
 const CLUSTERS_PER_ROW = 3
 
 export function buildProjectGraph() {
-  const paths = Object.keys(RAW).sort()
+  const textPaths = Object.keys(RAW)
+  const assetPaths = Object.keys(ASSETS)
+  const paths = [...new Set([...textPaths, ...assetPaths])].sort()
   const allPaths = new Set(paths)
 
   // ----- files, grouped by folder -----
   const files = {}
-  const foldersMap = {} // folderId -> [paths]
+  const foldersMap = {}
   for (const p of paths) {
     const folder = dirname(p)
-    files[p] = { id: p, name: basename(p), folder, path: p, position: { x: 0, y: 0 } }
+    const kind = kindOf(basename(p))
+    files[p] = {
+      id: p,
+      name: basename(p),
+      folder,
+      path: p,
+      kind,
+      url: ASSETS[p] || null,
+      position: { x: 0, y: 0 },
+    }
     ;(foldersMap[folder] ||= []).push(p)
   }
 
-  // ----- edges from real imports -----
+  // ----- edges from real imports (text files only) -----
   const seen = new Set()
   const edges = []
-  for (const p of paths) {
+  for (const p of textPaths) {
     const source = RAW[p]
     if (typeof source !== 'string') continue
     for (const spec of parseImports(source)) {
@@ -149,4 +176,9 @@ export const FILE_EXT_COLOR = {
   css: '#ec4899',
   md: '#94a3b8',
   html: '#fb923c',
+  svg: '#a78bfa',
+  png: '#a78bfa',
+  jpg: '#a78bfa',
+  wav: '#22d3ee',
+  mp3: '#22d3ee',
 }

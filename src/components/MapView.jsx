@@ -18,6 +18,7 @@ import TunableNode from './nodes/TunableNode'
 import PortNode from './nodes/PortNode'
 import ClusterNode from './nodes/ClusterNode'
 import ProjectFileNode from './nodes/ProjectFileNode'
+import AroundEdge from './edges/AroundEdge'
 
 const nodeTypes = {
   subspace: SubspaceNode,
@@ -29,19 +30,23 @@ const nodeTypes = {
   projectFile: ProjectFileNode,
 }
 
+const edgeTypes = { around: AroundEdge }
+
 const DOWNSTREAM_COLOR = '#34d399' // selection AFFECTS these (arrow exits selection's right)
 const UPSTREAM_COLOR = '#f59e0b' // these AFFECT the selection (arrow enters selection's left)
 
 /* ---------- helpers ---------- */
-function makeEdge(source, target, color) {
+function makeEdge(source, target, color, opts = {}) {
   return {
     id: `e-${source}-${target}`,
     source,
     target,
+    type: 'around', // route around node bodies (see AroundEdge)
     animated: true,
     className: 'focus-edge',
     style: { stroke: color, strokeWidth: 2 },
     markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
+    data: { lane: opts.lane ?? 0, bow: opts.bow ?? 'down' },
   }
 }
 
@@ -201,10 +206,10 @@ function Flow() {
     if (!focus) return []
     const fid = focus.focusedNodeId
     const E = []
-    focus.internalUpstream.forEach((cid) => E.push(makeEdge(cid, fid, '#818cf8')))
-    focus.internalDownstream.forEach((cid) => E.push(makeEdge(fid, cid, '#818cf8')))
-    focus.leftPorts.forEach((p) => E.push(makeEdge(`port-l-${p.extFnId}`, fid, FILE_COLORS[p.extFileId] || '#94a3b8')))
-    focus.rightPorts.forEach((p) => E.push(makeEdge(fid, `port-r-${p.extFnId}`, FILE_COLORS[p.extFileId] || '#94a3b8')))
+    focus.internalUpstream.forEach((cid, i) => E.push(makeEdge(cid, fid, '#818cf8', { lane: i, bow: 'up' })))
+    focus.internalDownstream.forEach((cid, i) => E.push(makeEdge(fid, cid, '#818cf8', { lane: i, bow: 'down' })))
+    focus.leftPorts.forEach((p, i) => E.push(makeEdge(`port-l-${p.extFnId}`, fid, FILE_COLORS[p.extFileId] || '#94a3b8', { lane: i, bow: 'up' })))
+    focus.rightPorts.forEach((p, i) => E.push(makeEdge(fid, `port-r-${p.extFnId}`, FILE_COLORS[p.extFileId] || '#94a3b8', { lane: i, bow: 'down' })))
     return E
   }, [focusedNodeId, functions, calls])
 
@@ -238,9 +243,9 @@ function Flow() {
     if (!focus) return []
     const E = []
     // selection → things it affects (arrow exits selection's RIGHT, enters target's LEFT)
-    focus.downstream.forEach((t) => E.push(makeEdge(focus.id, t, DOWNSTREAM_COLOR)))
+    focus.downstream.forEach((t, i) => E.push(makeEdge(focus.id, t, DOWNSTREAM_COLOR, { lane: i, bow: 'down' })))
     // things that affect selection → selection (arrow exits their RIGHT, enters selection's LEFT)
-    focus.upstream.forEach((srcId) => E.push(makeEdge(srcId, focus.id, UPSTREAM_COLOR)))
+    focus.upstream.forEach((srcId, i) => E.push(makeEdge(srcId, focus.id, UPSTREAM_COLOR, { lane: i, bow: 'up' })))
     return E
   }, [selectedProjectFileId, projectEdges])
 
@@ -362,6 +367,7 @@ function Flow() {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onPaneClick={onPaneClick}
         onPaneContextMenu={onPaneContextMenu}
@@ -397,13 +403,14 @@ function Flow() {
       {/* ---------- PROJECT-MODE LEGEND ---------- */}
       {isProject && (
         <div className="pointer-events-none absolute bottom-6 left-6 z-20 rounded-xl border border-slate-700 bg-slate-900/90 px-3 py-2 text-[11px] shadow-lg backdrop-blur">
-          <div className="mb-1 font-semibold text-slate-300">Click a file to trace dependencies</div>
+          <div className="mb-1 font-semibold text-slate-300">Click to trace · double-click to open</div>
           <div className="flex items-center gap-2 text-slate-400">
             <span className="inline-block h-0.5 w-5" style={{ background: DOWNSTREAM_COLOR }} /> affects (imports) →
           </div>
           <div className="flex items-center gap-2 text-slate-400">
             <span className="inline-block h-0.5 w-5" style={{ background: UPSTREAM_COLOR }} /> ← affected by (imported by)
           </div>
+          <div className="mt-1 text-slate-500">🖼 image · 🔊 audio · ▢ text → editor/viewer</div>
         </div>
       )}
 

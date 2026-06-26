@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { buildProjectGraph } from './projectGraph'
+import { buildProjectGraph, FILE_SOURCE } from './projectGraph'
 
 /* =============================================================================
  *  GEOMETRY CONSTANTS
@@ -112,6 +112,19 @@ export const useStore = create((set, get) => ({
   setViewMode: (mode) => set({ viewMode: mode, focusedNodeId: null, selectedProjectFileId: null }),
   selectProjectFile: (id) => set({ selectedProjectFileId: id }),
   clearProjectSelection: () => set({ selectedProjectFileId: null }),
+
+  // --- floating text editor / asset viewer ---
+  editorFileId: null, // project file currently open in the floating panel
+  fileEdits: {}, // { [path]: editedContent } — in-memory edits (no backend)
+  openEditor: (id) => set({ editorFileId: id }),
+  closeEditor: () => set({ editorFileId: null }),
+  setFileEdit: (path, content) => set((s) => ({ fileEdits: { ...s.fileEdits, [path]: content } })),
+  revertFileEdit: (path) =>
+    set((s) => {
+      const next = { ...s.fileEdits }
+      delete next[path]
+      return { fileEdits: next }
+    }),
 
   // --- interaction state ---
   focusedNodeId: null, // currently focused FUNCTION id (drives ports/edges/dimming)
@@ -281,4 +294,11 @@ export function getProjectFocus(state) {
   }
   const neighbors = new Set([selectedProjectFileId, ...downstream, ...upstream])
   return { id: selectedProjectFileId, downstream, upstream, neighbors }
+}
+
+/* Current content for a text file in the editor: the in-memory edit if present,
+ * otherwise the original source pulled at build time. */
+export function getFileContent(state, path) {
+  if (path in state.fileEdits) return state.fileEdits[path]
+  return FILE_SOURCE[path] ?? ''
 }

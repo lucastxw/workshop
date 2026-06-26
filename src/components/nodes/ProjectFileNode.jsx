@@ -16,6 +16,7 @@ function ProjectFileNode({ id, data }) {
   const selected = useStore((s) => s.selectedProjectFileId)
   const projectEdges = useStore((s) => s.projectEdges)
   const selectProjectFile = useStore((s) => s.selectProjectFile)
+  const openEditor = useStore((s) => s.openEditor)
 
   let relation = 'idle'
   if (selected) {
@@ -27,6 +28,7 @@ function ProjectFileNode({ id, data }) {
 
   const ext = data.name.split('.').pop()
   const dot = FILE_EXT_COLOR[ext] || '#64748b'
+  const kindIcon = data.kind === 'image' ? '🖼' : data.kind === 'audio' ? '🔊' : null
 
   const shell =
     relation === 'selected'
@@ -41,18 +43,27 @@ function ProjectFileNode({ id, data }) {
     <div
       onClick={(e) => {
         e.stopPropagation()
-        selectProjectFile(selected === id ? null : id)
+        selectProjectFile(id)
       }}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        openEditor(id)
+      }}
+      title="Double-click to open"
       className={[
         'flex cursor-pointer flex-col rounded-lg border px-3 py-2 transition-all duration-200',
         shell,
         relation === 'dim' ? 'opacity-20 hover:opacity-50' : 'opacity-100',
       ].join(' ')}
-      style={{ width: 174, height: 62 }}
+      style={{ width: 178, height: 64 }}
     >
       <Handle type="target" position={Position.Left} className="!h-2 !w-2 !bg-amber-400" />
       <div className="flex items-center gap-2">
-        <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: dot }} />
+        {kindIcon ? (
+          <span className="text-[13px] leading-none">{kindIcon}</span>
+        ) : (
+          <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: dot }} />
+        )}
         <span className="truncate font-mono text-[12px] text-slate-100">{data.name}</span>
       </div>
       <span className="mt-1 truncate pl-[18px] text-[9px] text-slate-500">{data.folder}</span>
