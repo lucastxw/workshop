@@ -90,6 +90,7 @@ function Flow() {
   const createFunction = useStore((s) => s.createFunction)
   const pendingFocus = useStore((s) => s.pendingFocus)
   const consumePendingFocus = useStore((s) => s.consumePendingFocus)
+  const persistProjectFilePosition = useStore((s) => s.persistProjectFilePosition)
 
   const [menu, setMenu] = useState(null) // { x, y, flowPos }
   const [search, setSearch] = useState('')
@@ -285,6 +286,15 @@ function Flow() {
     [moveNode],
   )
 
+  const onNodeDragStop = useCallback(
+    (event, node) => {
+      if (isProject && node.type === 'projectFile') {
+        persistProjectFilePosition(node.id, node.position)
+      }
+    },
+    [isProject, persistProjectFilePosition],
+  )
+
   const onPaneClick = useCallback(() => {
     clearFocus()
     clearProjectSelection()
@@ -395,6 +405,7 @@ function Flow() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
+        onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
         onPaneContextMenu={onPaneContextMenu}
         minZoom={0.1}

@@ -1,6 +1,7 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { kindOf } from '../projectGraph'
+import { supabase } from '../lib/supabase'
 
 /* File Explorer (top-left). Mode-aware:
  *   • Project mode  → lists the REAL directory; click selects + focuses the file
@@ -10,6 +11,10 @@ import { kindOf } from '../projectGraph'
 export default function FileExplorer() {
   const viewMode = useStore((s) => s.viewMode)
   const isProject = viewMode === 'project'
+
+  const [showGuide, setShowGuide] = useState(false)
+  const supabaseLoading = useStore((s) => s.supabaseLoading)
+  const supabaseError = useStore((s) => s.supabaseError)
 
   // function-mode data
   const files = useStore((s) => s.files)
@@ -65,7 +70,7 @@ export default function FileExplorer() {
         const kind = kindOf(file.name)
 
         if (kind === 'image' || kind === 'audio') {
-          return { path, name: file.name, folder, kind, url: URL.createObjectURL(file) }
+          return { path, name: file.name, folder, kind, url: URL.createObjectURL(file), rawFile: file }
         }
 
         const source = await file.text()
@@ -167,6 +172,92 @@ export default function FileExplorer() {
             })}
           </div>
         ))}
+      </div>
+
+      {/* Supabase Guide Panel */}
+      {showGuide && (
+        <div className="thin-scroll border-t border-slate-800 bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-400 max-h-[60%] overflow-y-auto">
+          <h4 className="font-semibold text-slate-200 mb-1.5 uppercase tracking-wider text-[10px]">Supabase Setup Instructions</h4>
+          <ol className="list-decimal pl-4 space-y-1.5">
+            <li>
+              <strong>Create Project:</strong> Sign in to <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">supabase.com</a> and create a new project.
+            </li>
+            <li>
+              <strong>Get Keys:</strong> Copy the <strong>Project URL</strong> and <strong>Anon Key</strong> from <em>Project Settings &gt; API</em>.
+            </li>
+            <li>
+              <strong>Environment File:</strong> Create a <code className="bg-slate-800 px-1 py-0.5 rounded font-mono text-[10px] text-slate-200">.env</code> file in the repository root and add:
+              <pre className="mt-1 bg-slate-900 p-1.5 rounded font-mono text-[9.5px] text-indigo-300 overflow-x-auto select-all">
+{`VITE_SUPABASE_URL=your_project_url
+VITE_SUPABASE_ANON_KEY=your_anon_key`}
+              </pre>
+            </li>
+            <li>
+              <strong>Run SQL:</strong> Open the <strong>SQL Editor</strong> in Supabase, create a new query, paste this, and click run:
+              <pre className="mt-1 bg-slate-900 p-1.5 rounded font-mono text-[9.5px] text-indigo-300 overflow-x-auto max-h-32 overflow-y-auto select-all">
+{`create table if not exists public.project_files (
+  id text primary key,
+  path text unique not null,
+  name text not null,
+  folder text not null,
+  kind text not null,
+  url text,
+  source text,
+  position jsonb default '{"x":0,"y":0}'::jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.project_files enable row level security;
+
+create policy "Allow public read access" on public.project_files for select using (true);
+create policy "Allow public insert access" on public.project_files for insert with check (true);
+create policy "Allow public update access" on public.project_files for update using (true);
+create policy "Allow public delete access" on public.project_files for delete using (true);`}
+              </pre>
+            </li>
+            <li>
+              <strong>Storage Bucket:</strong> Go to <strong>Storage</strong>, create a public bucket named <code className="bg-slate-800 px-1 py-0.5 rounded font-mono text-[10px] text-slate-200">files-bucket</code>, and add policies to allow upload/delete for all.
+            </li>
+          </ol>
+          <div className="mt-2.5 pt-2 border-t border-slate-900 text-slate-500 text-[10px]">
+            * Note: If you configure `.env`, please restart the Vite development server to load the new variables.
+          </div>
+        </div>
+      )}
+
+      {/* Supabase status footer */}
+      <div className="border-t border-slate-800 bg-slate-900/60 p-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2 w-2">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${supabase ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${supabase ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+            </span>
+            <span className="text-[11px] font-medium text-slate-400">
+              {supabase ? 'Supabase Connected' : 'Local Fallback Mode'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowGuide(!showGuide)}
+            className="rounded bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-slate-300 hover:bg-slate-700 transition"
+          >
+            {showGuide ? 'Hide Guide' : 'Setup Guide'}
+          </button>
+        </div>
+        
+        {supabaseLoading && (
+          <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-indigo-400 font-mono">
+            <span className="h-3 w-3 animate-spin border border-t-transparent border-indigo-400 rounded-full" />
+            Syncing with Supabase...
+          </div>
+        )}
+
+        {supabaseError && (
+          <div className="mt-1.5 text-[10px] text-rose-400 font-mono break-all bg-rose-950/20 p-1.5 rounded border border-rose-900/30">
+            Error: {supabaseError}
+          </div>
+        )}
       </div>
     </div>
   )

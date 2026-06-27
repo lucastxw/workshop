@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore, getFileContent } from '../store'
 import AiSummary from './AiSummary'
+import { supabase } from '../lib/supabase'
 
 /* A small floating, draggable panel that opens on double-click of a project
  * file node:
@@ -15,6 +16,8 @@ export default function FloatingEditor() {
   const setFileEdit = useStore((s) => s.setFileEdit)
   const revertFileEdit = useStore((s) => s.revertFileEdit)
   const fileEdits = useStore((s) => s.fileEdits)
+  const saveProjectFile = useStore((s) => s.saveProjectFile)
+  const supabaseLoading = useStore((s) => s.supabaseLoading)
   // subscribe so the textarea re-renders on external content changes
   const content = useStore((s) => (editorFileId ? getFileContent(s, editorFileId) : ''))
 
@@ -100,13 +103,22 @@ export default function FloatingEditor() {
                 className="thin-scroll flex-1 resize-none bg-[#0b0e14] p-3 font-mono text-[12.5px] leading-relaxed text-slate-200 outline-none"
               />
               <div className="flex items-center gap-2 border-t border-slate-800 bg-slate-900 px-3 py-1.5 text-[11px]">
-                <span className="text-slate-500">{content.split('\n').length} lines · in-memory only</span>
+                <span className="text-slate-500">
+                  {content.split('\n').length} lines · {supabase ? 'Supabase mode' : 'local mode'}
+                </span>
                 <button
-                  disabled={!edited}
+                  disabled={!edited || supabaseLoading}
                   onClick={() => revertFileEdit(file.path)}
                   className="ml-auto rounded px-2 py-1 text-slate-300 enabled:hover:bg-slate-800 disabled:opacity-40"
                 >
                   Revert
+                </button>
+                <button
+                  disabled={!edited || supabaseLoading}
+                  onClick={() => saveProjectFile(file.path)}
+                  className="rounded bg-indigo-600 px-3 py-1 font-semibold text-white enabled:hover:bg-indigo-500 disabled:opacity-40 transition"
+                >
+                  {supabaseLoading ? 'Saving...' : 'Save'}
                 </button>
               </div>
             </>
