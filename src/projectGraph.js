@@ -74,6 +74,56 @@ export function parseImports(source) {
   return specs
 }
 
+/* Extract the top-level functions / components / classes declared in a source
+ * file, with the 1-based line where each is defined — used to list functions
+ * "under" a file and to jump the editor to a function's code. */
+const FN_PATTERNS = [
+  /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z0-9_$]+)\s*\(/, // function foo(
+  /^\s*(?:export\s+)?(?:default\s+)?(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/, // const foo = (…) =>
+  /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s+)?function\b/, // const foo = function
+  /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z0-9_$]+)\b/, // class Foo
+]
+export function parseFunctions(source) {
+  if (typeof source !== 'string') return []
+  const lines = source.split('\n')
+  const out = []
+  const seen = new Set()
+  for (let i = 0; i < lines.length; i++) {
+    for (const re of FN_PATTERNS) {
+      const m = lines[i].match(re)
+      if (m) {
+        const name = m[1]
+        if (!seen.has(name)) {
+          seen.add(name)
+          out.push({ name, line: i + 1, endLine: findBlockEnd(lines, i) })
+        }
+        break
+      }
+    }
+  }
+  return out
+}
+
+/* Rough end-of-block finder: brace-match from the declaration line. Good enough
+ * for highlighting a function's chunk (ignores braces in strings/comments). */
+function findBlockEnd(lines, startIdx) {
+  let depth = 0
+  let started = false
+  for (let i = startIdx; i < lines.length && i < startIdx + 600; i++) {
+    for (const ch of lines[i]) {
+      if (ch === '{') {
+        depth++
+        started = true
+      } else if (ch === '}') {
+        depth--
+      }
+    }
+    if (started && depth <= 0) return i + 1
+    if (!started && i > startIdx + 2) return startIdx + 1 // single-expression (e.g. arrow) → one line
+  }
+  return Math.min(startIdx + 1, lines.length)
+}
+
 /* ---------- layout constants (roomier than before so edges stay legible) ---------- */
 const FILE_W = 178
 const FILE_H = 64

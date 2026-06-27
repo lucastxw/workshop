@@ -33,6 +33,12 @@ body,
   background: #475569;
 }
 
+/* We drive node selection styling from the store, so suppress React Flow's
+   default selection outline. */
+.react-flow__node.selected {
+  box-shadow: none;
+}
+
 /* Animated focus edges */
 .react-flow__edge.focus-edge .react-flow__edge-path {
   stroke-dasharray: 6;

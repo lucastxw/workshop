@@ -132,14 +132,30 @@ export const useStore = create((set, get) => ({
   projectFiles: projectGraph.files,
   projectFolders: projectGraph.folders,
   projectEdges: projectGraph.edges, // [{ source, target }] = source imports/affects target
-  selectedProjectFileId: null,
+  selectedProjectFileId: null, // the single "active" file (drives arrows + functions + editor)
+  selectedFileIds: [], // marquee / ctrl multi-selection (>=2 dims the rest)
   projectFolderFilter: null,
+  editorScrollTarget: null, // { path, line, nonce } — jump the editor to a function
 
   setViewMode: (mode) => set({ viewMode: mode, focusedNodeId: null, selectedProjectFileId: null }),
-  selectProjectFile: (id) => set({ selectedProjectFileId: id }),
-  clearProjectSelection: () => set({ selectedProjectFileId: null }),
+  // Single, deliberate selection (explorer / search) — also opens the IDE/viewer.
+  selectProjectFile: (id) => set({ selectedProjectFileId: id, selectedFileIds: id ? [id] : [], editorFileId: id || null }),
+  clearProjectSelection: () => set({ selectedProjectFileId: null, selectedFileIds: [] }),
+  // Multi-selection from React Flow (marquee / ctrl-click). One file → active.
+  // 2+ files closes any open overlay (IDE / image / audio) — multi-select is for
+  // moving files, not viewing them.
+  setSelection: (ids) =>
+    set((s) => ({
+      selectedFileIds: ids,
+      selectedProjectFileId: ids.length === 1 ? ids[0] : null,
+      editorFileId: ids.length >= 2 ? null : s.editorFileId,
+    })),
   setProjectFolderFilter: (folder) => set({ projectFolderFilter: folder }),
   clearProjectFolderFilter: () => set({ projectFolderFilter: null }),
+
+  // Jump the open editor to a function's line range (nonce makes repeat clicks re-fire).
+  scrollEditorToLine: (path, line, endLine) =>
+    set((s) => ({ editorScrollTarget: { path, line, endLine: endLine || line, nonce: (s.editorScrollTarget?.nonce || 0) + 1 } })),
 
   addProjectFiles: (newFiles) =>
     set((state) => {

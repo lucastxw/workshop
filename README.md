@@ -1,13 +1,27 @@
 # Infinite Spatial IDE
 
-A prototype of a spatial, infinitely-zoomable code editor where files and functions live on a 2D map instead of a file tree.
+A prototype of a spatial, infinitely-zoomable code editor where the **real directory** of this repo lives on a 2D map instead of a file tree. Files are rendered as nodes clustered by folder; clicking one traces its **actual import dependencies**, lists the **functions inside it**, and opens it in a floating IDE.
 
-It has **two views** (toggle top-left of the canvas):
+The map is generated from the live source tree, not mock data — at build time via Vite's `import.meta.glob` ([`src/projectGraph.js`](src/projectGraph.js)), which reads every file, parses real `import`s for the dependency graph and real function/component declarations for the per-file outline.
 
-1. **📁 Project Map** _(default)_ — the **real directory** of this repo, rendered as nodes clustered by folder. Click a file to reveal its **actual import dependencies** as directional arrows. This graph is generated from the live source tree, not mock data (see below).
-2. **◯ Functions** — a mock spatial demo: single-clicking a function reveals its call graph as live edges and dynamic "port" connectors on the file's edges.
+> Prototype only — there is **no backend**.
 
-> Prototype only — there is **no backend**. The Functions view is driven by a hardcoded mock graph in [`src/store.js`](src/store.js); the Project Map is derived at build time from the real files via Vite's `import.meta.glob` ([`src/projectGraph.js`](src/projectGraph.js)).
+## One canvas, one click
+
+Clicking a file (or selecting it in the Explorer / search) does three things at once:
+
+1. **Traces dependencies** — green arrows exit its right to files it imports/affects; amber arrows enter its left from files that import/affect it; everything uninvolved dims.
+2. **Reveals its functions** — the functions, components, and classes declared in the file pop out as `ƒ` pills beside the node ([`parseFunctions`](src/projectGraph.js) + [`ProjectFunctionNode`](src/components/nodes/ProjectFunctionNode.jsx)).
+3. **Opens the IDE** — for text files the floating editor opens; **clicking a `ƒ` pill jumps the editor to that function's line** and highlights it. (Images open the viewer, audio the player.)
+
+## Selecting files to focus on
+
+Selection uses React Flow's built-in machinery, wired in [`MapView`](src/components/MapView.jsx):
+
+- **Left-drag a box** over the canvas to marquee-select every file it touches (`selectionOnDrag` + partial selection mode).
+- **Ctrl/⌘ + click** to add or remove files from the selection one by one.
+- With **2+ files selected**, the selected files stay lit and everything else dims — so you see just the set you care about.
+- **Pan** with a right- or middle-mouse drag (or the minimap); scroll still zooms. Left-drag is reserved for selection.
 
 ## Stack
 
@@ -83,48 +97,23 @@ Inside the editor, text files have an **✨ AI Explain** tab that asks Claude to
 
 > ⚠️ **No backend, so the key lives in the browser.** You paste an Anthropic API key into the panel; it's stored in `localStorage` and sent **directly** to Anthropic from the page (`dangerouslyAllowBrowser`). This is acceptable for local prototyping only — **in production, proxy these calls through a small server** that holds the key, and never ship the key to the client. The panel shows this warning before a key is entered.
 
-## The core idea (Functions view): focus → ports
-
-The store holds a flat call list (`source → target`). When you single-click a function,
-[`getFocusGraph`](src/store.js) classifies every related call by comparing the parent `fileId`:
-
-| Relationship              | Result                                    |
-| ------------------------- | ----------------------------------------- |
-| same-file caller          | internal **upstream** edge                |
-| same-file callee          | internal **downstream** edge              |
-| **other-file** caller     | **left port** (something calls in)        |
-| **other-file** callee     | **right port** (this function calls out)  |
-
-[`MapView.jsx`](src/components/MapView.jsx) derives port nodes as children of the focused file,
-positions them on the left/right edges, colours them by the crossing file (`FILE_COLORS`), draws
-animated edges, and dims all sibling functions.
-
-**Try it:** click `validateToken()` in `auth.service.ts` — it has a left port (called from
-`api.client.ts`), a right port (it calls `db.repository.ts`), and an internal caller, so it
-exercises every path at once.
-
-## Custom node types
-
-- **Subspace** (translucent rectangle) — visual grouping. Top-right toolbar: Description · Colour · Expand (zooms it to fill the map).
-- **File** (square) — movable container that auto-resizes (`getFileSize`) to enclose the function pills inside it. Double-click opens the terminal editor modal.
-- **Function** (pill) — lives inside a file; single-click focuses it.
-- **Tunable** (square variant) — a tweakable configuration value.
-
 ## Interactions
 
 | Action                                | Result                                                              |
 | ------------------------------------- | ------------------------------------------------------------------ |
-| Toggle **📁 Project Map / ◯ Functions** | Switches between the real directory graph and the mock demo       |
-| Click a file in **Project Map**       | Reveals dependency arrows (green = affects, amber = affected-by), dims the rest |
-| **Double-click** a file in Project Map | Opens the floating panel — code editor (text), image viewer, or audio player |
-| **✨ AI Explain** tab (text files)      | Streams a Claude-generated summary of the file (needs an Anthropic API key) |
-| Click a file in the Explorer          | Highlights and pans/zooms the map to it                            |
-| Single-click a function               | Focus: dimming, internal edges, dynamic ports                      |
-| Double-click a file (node or list)    | Opens the terminal editor modal (Esc to close)                     |
-| **★ Save view**                       | Saves the current viewport as a bookmark                           |
-| Double-click a bookmark               | Snapshots current view as a `↩ Return point`, flies to the bookmark, focuses its object |
-| Right-click canvas / **+** FAB        | Create Subspace, File (prompts folder), or Function (pick file)    |
-| Search bar                            | Jump to any file / function / subspace by name                     |
+| Click a file                          | Traces dependency arrows + reveals its `ƒ` function pills + opens the IDE / viewer |
+| Click a `ƒ` function pill             | Jumps the editor to that function's line and highlights it         |
+| **Left-drag a box**                   | Marquee-select all files inside the rectangle                      |
+| **Ctrl/⌘ + click**                    | Add / remove files from the multi-selection (non-selected dim)     |
+| Right- / middle-drag                  | Pan the canvas (scroll zooms; minimap also pans)                   |
+| **✨ AI Explain** tab (text files)      | Streams a Claude-generated summary of the file (needs an API key)  |
+| Click a file in the Explorer          | Selects + frames it on the map (same as clicking the node)         |
+| **Import files**, **Delete** (Explorer)| Add real files/folders to the map, or remove the selected file    |
+| Folder header (Explorer)              | Filters the map to that one folder cluster                         |
+| **★ Save view** / double-click a bookmark | Save the viewport, or fly back to a saved one                  |
+| Search bar / Esc                      | Jump to a file by name / clear the selection                       |
+
+> The earlier mock **Functions** view (hardcoded subspaces, call-graph ports, tunables) was folded into this single view — functions now come from the real files. That mock data and its node components still live in [`src/store.js`](src/store.js) / `src/components/nodes/` but are no longer rendered.
 
 ## Project structure
 
@@ -148,8 +137,9 @@ src/
    ├─ edges/
    │  └─ AroundEdge.jsx     # curved edge that routes around nodes
    └─ nodes/
-      ├─ ClusterNode.jsx       # Project Map: folder background
-      ├─ ProjectFileNode.jsx   # Project Map: a real file + dependency highlighting
+      ├─ ClusterNode.jsx       # folder cluster background
+      ├─ ProjectFileNode.jsx   # a real file (selection + dependency highlighting)
+      ├─ ProjectFunctionNode.jsx # ƒ pill: a function in the active file → jump-to-line
       ├─ SubspaceNode.jsx
       ├─ FileNode.jsx
       ├─ FunctionNode.jsx

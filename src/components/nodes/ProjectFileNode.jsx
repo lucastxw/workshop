@@ -3,26 +3,26 @@ import { Handle, Position } from 'reactflow'
 import { useStore } from '../../store'
 import { FILE_EXT_COLOR } from '../../projectGraph'
 
-/* A real file from the directory. Clicking it selects it; the store then drives
- * the directional arrows + dimming for the whole map.
- *
- * Relationship to the currently selected file decides the look:
- *   selected   → highlighted ring
- *   downstream → this file is AFFECTED BY the selection (selection points here)
- *   upstream   → this file AFFECTS the selection (it points at the selection)
- *   dim        → not involved → faded out
+/* A real file from the directory. Selection is driven by React Flow (single
+ * click, Ctrl/⌘-click, or marquee). The store then decides the look:
+ *   • single active file → ring + directional dependency arrows + ƒ pills
+ *   • multi-selection     → selected files stay lit, the rest dim
+ *   • single active's deps → downstream (green) / upstream (amber) tint
  */
 function ProjectFileNode({ id, data }) {
-  const selected = useStore((s) => s.selectedProjectFileId)
+  const activeId = useStore((s) => s.selectedProjectFileId)
+  const selectedFileIds = useStore((s) => s.selectedFileIds)
   const projectEdges = useStore((s) => s.projectEdges)
-  const selectProjectFile = useStore((s) => s.selectProjectFile)
   const openEditor = useStore((s) => s.openEditor)
 
+  const multi = selectedFileIds.length >= 2
   let relation = 'idle'
-  if (selected) {
-    if (selected === id) relation = 'selected'
-    else if (projectEdges.some((e) => e.source === selected && e.target === id)) relation = 'downstream'
-    else if (projectEdges.some((e) => e.target === selected && e.source === id)) relation = 'upstream'
+  if (multi) {
+    relation = selectedFileIds.includes(id) ? 'selected' : 'dim'
+  } else if (activeId) {
+    if (activeId === id) relation = 'selected'
+    else if (projectEdges.some((e) => e.source === activeId && e.target === id)) relation = 'downstream'
+    else if (projectEdges.some((e) => e.target === activeId && e.source === id)) relation = 'upstream'
     else relation = 'dim'
   }
 
@@ -41,17 +41,14 @@ function ProjectFileNode({ id, data }) {
 
   return (
     <div
+      // Plain click opens the IDE/viewer; React Flow handles the selection itself.
+      // Ctrl/⌘-click only multi-selects (for moving) — don't open the IDE.
       onClick={(e) => {
-        e.stopPropagation()
-        selectProjectFile(id)
+        if (!(e.ctrlKey || e.metaKey)) openEditor(id)
       }}
-      onDoubleClick={(e) => {
-        e.stopPropagation()
-        openEditor(id)
-      }}
-      title="Double-click to open"
+      title="Click to open · drag a box / Ctrl+click to multi-select · drag a selected file to move the group"
       className={[
-        'flex cursor-pointer flex-col rounded-lg border px-3 py-2 transition-all duration-200',
+        'flex h-full w-full cursor-pointer flex-col rounded-lg border px-3 py-2 transition-all duration-200',
         shell,
         relation === 'dim' ? 'opacity-20 hover:opacity-50' : 'opacity-100',
       ].join(' ')}

@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, getFileContent } from '../store'
+import { parseFunctions } from '../projectGraph'
 import AiSummary from './AiSummary'
 
-/* A small floating, draggable panel that opens on double-click of a project
- * file node:
- *   • text  → an editable code editor (edits are kept in-memory, no backend)
- *   • image → an image viewer
- *   • audio → an audio player with a Play button
+/* Floating, draggable panel opened when a project file is clicked:
+ *   • text  → a line-numbered code viewer that highlights a function's lines.
+ *             Jump via the in-editor "ƒ Jump to…" dropdown OR by clicking a
+ *             function pill on the canvas. Toggle to Edit for an editable view.
+ *   • image → image viewer   • audio → audio player
  */
 export default function FloatingEditor() {
   const editorFileId = useStore((s) => s.editorFileId)
@@ -15,21 +16,65 @@ export default function FloatingEditor() {
   const setFileEdit = useStore((s) => s.setFileEdit)
   const revertFileEdit = useStore((s) => s.revertFileEdit)
   const fileEdits = useStore((s) => s.fileEdits)
-  // subscribe so the textarea re-renders on external content changes
   const content = useStore((s) => (editorFileId ? getFileContent(s, editorFileId) : ''))
+  const scrollTarget = useStore((s) => s.editorScrollTarget)
 
-  const [tab, setTab] = useState('code') // 'code' | 'ai' (text files only)
+  const [tab, setTab] = useState('code') // 'code' | 'ai'
+  const [editMode, setEditMode] = useState(false)
+  const [highlight, setHighlight] = useState(null) // { start, end } 1-based
   const [pos, setPos] = useState({ x: 0, y: 0 })
   const drag = useRef(null)
   const audioRef = useRef(null)
+  const scrollRef = useRef(null)
+  const hotLineRef = useRef(null)
 
-  // Open near the top-right of the viewport each time a new file is opened.
+  const file = editorFileId ? projectFiles[editorFileId] : null
+  const lines = useMemo(() => content.split('\n'), [content])
+  const fns = useMemo(() => (file?.kind === 'text' ? parseFunctions(content) : []), [content, file?.kind])
+
+  const jumpTo = (start, end) => {
+    setTab('code')
+    setEditMode(false)
+    setHighlight({ start, end: end || start })
+  }
+
+  // Reset view each time a new file opens.
   useEffect(() => {
     if (editorFileId) {
-      setPos({ x: Math.max(24, window.innerWidth - 470), y: 96 })
+      setPos({ x: Math.max(24, window.innerWidth - 490), y: 90 })
       setTab('code')
+      setEditMode(false)
+      setHighlight(null)
     }
   }, [editorFileId])
+
+  // A function pill on the canvas was clicked.
+  useEffect(() => {
+    if (!scrollTarget || !editorFileId) return
+    const f = useStore.getState().projectFiles[editorFileId]
+    if (!f || f.kind !== 'text' || scrollTarget.path !== f.path) return
+    jumpTo(scrollTarget.line, scrollTarget.endLine)
+  }, [scrollTarget, editorFileId])
+
+  // Scroll the highlighted chunk into view, contained to the panel's scroller.
+  useEffect(() => {
+    if (!highlight || tab !== 'code' || editMode) return
+    let raf2
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        const el = hotLineRef.current
+        const sc = scrollRef.current
+        if (!el || !sc) return
+        const elRect = el.getBoundingClientRect()
+        const scRect = sc.getBoundingClientRect()
+        sc.scrollTop += elRect.top - scRect.top - sc.clientHeight / 3
+      })
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+    }
+  }, [highlight, tab, editMode, content])
 
   useEffect(() => {
     const onMove = (e) => {
@@ -51,9 +96,7 @@ export default function FloatingEditor() {
     return () => window.removeEventListener('keydown', onKey)
   }, [closeEditor])
 
-  if (!editorFileId) return null
-  const file = projectFiles[editorFileId]
-  if (!file) return null
+  if (!editorFileId || !file) return null
 
   const edited = file.path in fileEdits
   const startDrag = (e) => {
@@ -62,8 +105,8 @@ export default function FloatingEditor() {
 
   return (
     <div
-      className="fixed z-50 flex w-[440px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-slate-700 bg-[#0b0e14] shadow-2xl"
-      style={{ left: pos.x, top: pos.y, height: file.kind === 'text' ? 420 : 'auto' }}
+      className="fixed z-50 flex w-[480px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-slate-700 bg-[#0b0e14] shadow-2xl"
+      style={{ left: pos.x, top: pos.y, height: file.kind === 'text' ? 460 : 'auto' }}
     >
       {/* title bar (drag handle) */}
       <div
@@ -83,7 +126,7 @@ export default function FloatingEditor() {
 
       {/* body */}
       {file.kind === 'text' && (
-        <>
+        <div className="flex min-h-0 flex-1 flex-col">
           {/* Code / AI tabs */}
           <div className="flex items-center gap-1 border-b border-slate-800 bg-slate-900/60 px-2 py-1 text-[11px]">
             <TabBtn active={tab === 'code'} onClick={() => setTab('code')}>{'</> Code'}</TabBtn>
@@ -92,28 +135,81 @@ export default function FloatingEditor() {
           </div>
 
           {tab === 'code' ? (
-            <>
-              <textarea
-                spellCheck={false}
-                value={content}
-                onChange={(e) => setFileEdit(file.path, e.target.value)}
-                className="thin-scroll flex-1 resize-none bg-[#0b0e14] p-3 font-mono text-[12.5px] leading-relaxed text-slate-200 outline-none"
-              />
-              <div className="flex items-center gap-2 border-t border-slate-800 bg-slate-900 px-3 py-1.5 text-[11px]">
-                <span className="text-slate-500">{content.split('\n').length} lines · in-memory only</span>
-                <button
-                  disabled={!edited}
-                  onClick={() => revertFileEdit(file.path)}
-                  className="ml-auto rounded px-2 py-1 text-slate-300 enabled:hover:bg-slate-800 disabled:opacity-40"
+            <div className="flex min-h-0 flex-1 flex-col">
+              {/* toolbar: jump-to-function + edit toggle */}
+              <div className="flex items-center gap-2 border-b border-slate-800/60 px-2 py-1 text-[10px] text-slate-500">
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const fn = fns[Number(e.target.value)]
+                    if (fn) jumpTo(fn.line, fn.endLine)
+                  }}
+                  disabled={editMode || fns.length === 0}
+                  className="max-w-[150px] rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-200 outline-none disabled:opacity-40"
+                  title="Jump to a function"
                 >
-                  Revert
+                  <option value="">ƒ Jump to… ({fns.length})</option>
+                  {fns.map((fn, i) => (
+                    <option key={i} value={i}>
+                      {fn.name} :{fn.line}
+                    </option>
+                  ))}
+                </select>
+                <button onClick={() => setEditMode((v) => !v)} className="rounded px-2 py-0.5 text-slate-300 hover:bg-slate-800">
+                  {editMode ? '👁 View' : '✎ Edit'}
                 </button>
+                {edited && (
+                  <button onClick={() => revertFileEdit(file.path)} className="rounded px-2 py-0.5 text-amber-300 hover:bg-slate-800">
+                    Revert
+                  </button>
+                )}
+                {highlight && !editMode && (
+                  <span className="font-medium text-indigo-300">
+                    L{highlight.start}–{highlight.end}
+                  </span>
+                )}
+                <span className="ml-auto">{lines.length} lines</span>
               </div>
-            </>
+
+              {editMode ? (
+                <textarea
+                  spellCheck={false}
+                  value={content}
+                  onChange={(e) => setFileEdit(file.path, e.target.value)}
+                  className="thin-scroll min-h-0 flex-1 resize-none bg-[#0b0e14] p-3 font-mono text-[12.5px] leading-5 text-slate-200 outline-none"
+                />
+              ) : (
+                <div ref={scrollRef} className="thin-scroll min-h-0 flex-1 overflow-auto bg-[#0b0e14] py-2 font-mono text-[12.5px] leading-5">
+                  <div className="w-max min-w-full">
+                    {lines.map((ln, i) => {
+                      const n = i + 1
+                      const hot = highlight && n >= highlight.start && n <= highlight.end
+                      return (
+                        <div
+                          key={i}
+                          ref={hot && n === highlight.start ? hotLineRef : undefined}
+                          className={hot ? 'bg-indigo-500/25 ring-1 ring-inset ring-indigo-500/30' : ''}
+                        >
+                          <span
+                            className={[
+                              'sticky left-0 inline-block w-12 select-none px-2 text-right tabular-nums',
+                              hot ? 'bg-indigo-600/40 font-semibold text-indigo-200' : 'bg-[#0b0e14] text-slate-600',
+                            ].join(' ')}
+                          >
+                            {n}
+                          </span>
+                          <span className="whitespace-pre pr-4 text-slate-200">{ln === '' ? ' ' : ln}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           ) : (
             <AiSummary file={file} content={content} />
           )}
-        </>
+        </div>
       )}
 
       {file.kind === 'image' && (
