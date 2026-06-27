@@ -61,7 +61,7 @@ function TunableNode({ id, data }) {
           e.stopPropagation()
           removeTuner(id)
         }}
-        className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full border border-slate-700 bg-slate-950/80 text-[10px] text-slate-400 hover:border-cyan-500 hover:bg-slate-900 hover:text-cyan-400 transition-all z-10"
+        className="nodrag absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full border border-slate-700 bg-slate-950/80 text-[10px] text-slate-400 hover:border-cyan-500 hover:bg-slate-900 hover:text-cyan-400 transition-all z-10"
         title="Remove tuner"
       >
         ✕
@@ -84,7 +84,7 @@ function TunableNode({ id, data }) {
                 <button
                   type="button"
                   onClick={() => setSelectedTunableVariable(id, variable.id)}
-                  className={`flex-1 rounded-lg border px-2 py-1 text-left text-[12px] ${isSelected ? 'border-cyan-400 bg-cyan-950/70 text-cyan-100' : 'border-slate-700 bg-slate-900/70 text-slate-200'}`}
+                  className={`nodrag flex-1 rounded-lg border px-2 py-1 text-left text-[12px] ${isSelected ? 'border-cyan-400 bg-cyan-950/70 text-cyan-100' : 'border-slate-700 bg-slate-900/70 text-slate-200'}`}
                 >
                   <div className="flex items-center gap-2">
                     <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: variable.colorA }} />
@@ -95,7 +95,7 @@ function TunableNode({ id, data }) {
                 <button
                   type="button"
                   onClick={() => removeTunerVariable(id, variable.id)}
-                  className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+                  className="nodrag rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
                 >
                   ✕
                 </button>
@@ -103,7 +103,7 @@ function TunableNode({ id, data }) {
               <input
                 value={variable.value}
                 onChange={(event) => updateTunerVariableValue(id, variable.id, event.target.value)}
-                className="mt-2 w-full rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-[12px] text-slate-100 outline-none focus:border-cyan-500"
+                className="nodrag mt-2 w-full rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-[12px] text-slate-100 outline-none focus:border-cyan-500"
               />
             </div>
           )
@@ -115,7 +115,7 @@ function TunableNode({ id, data }) {
           type="button"
           onClick={handleSave}
           disabled={supabaseLoading}
-          className="mt-3 w-full rounded-xl border border-cyan-500/60 bg-cyan-600/90 hover:bg-cyan-500 text-white text-[12px] font-semibold py-1.5 transition-colors shadow-md shadow-cyan-950/40 disabled:opacity-50"
+          className="nodrag mt-3 w-full rounded-xl border border-cyan-500/60 bg-cyan-600/90 hover:bg-cyan-500 text-white text-[12px] font-semibold py-1.5 transition-colors shadow-md shadow-cyan-950/40 disabled:opacity-50"
         >
           {supabaseLoading ? 'Saving...' : '💾 Save Changes'}
         </button>

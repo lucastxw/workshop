@@ -263,7 +263,8 @@ export const useStore = create((set, get) => ({
     set((s) => ({
       selectedFileIds: ids,
       selectedProjectFileId: ids.length === 1 ? ids[0] : null,
-      editorFileId: ids.length >= 2 ? null : s.editorFileId,
+      editorFileIds: ids.length >= 2 ? [] : s.editorFileIds,
+      activeEditorFileId: ids.length >= 2 ? null : s.activeEditorFileId,
     })),
   setProjectFolderFilter: (folder) => set({ projectFolderFilter: folder }),
   clearProjectFolderFilter: () => set({ projectFolderFilter: null }),
@@ -630,10 +631,24 @@ export const useStore = create((set, get) => ({
   setSummary: (path, text) => set((s) => ({ summaries: { ...s.summaries, [path]: text } })),
 
   // --- floating text editor / asset viewer ---
-  editorFileId: null, // project file currently open in the floating panel
+  editorFileIds: [], // project files currently open in floating panels
+  activeEditorFileId: null, // the active/focused editor file ID
   fileEdits: {}, // { [path]: editedContent } — in-memory edits (no backend)
-  openEditor: (id) => set({ editorFileId: id }),
-  closeEditor: () => set({ editorFileId: null }),
+  openEditor: (id) =>
+    set((s) => ({
+      editorFileIds: s.editorFileIds.includes(id) ? s.editorFileIds : [...s.editorFileIds, id],
+      activeEditorFileId: id,
+    })),
+  closeEditor: (id) =>
+    set((s) => {
+      const nextIds = s.editorFileIds.filter((x) => x !== id)
+      const nextActive = s.activeEditorFileId === id ? (nextIds[nextIds.length - 1] || null) : s.activeEditorFileId
+      return {
+        editorFileIds: nextIds,
+        activeEditorFileId: nextActive,
+      }
+    }),
+  setActiveEditor: (id) => set({ activeEditorFileId: id }),
   setFileEdit: (path, content) => set((s) => ({ fileEdits: { ...s.fileEdits, [path]: content } })),
   revertFileEdit: (path) =>
     set((s) => {

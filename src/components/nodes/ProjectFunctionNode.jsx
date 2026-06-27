@@ -9,7 +9,7 @@ function ProjectFunctionNode({ data }) {
   const scrollEditorToLine = useStore((s) => s.scrollEditorToLine)
   // Only jump the IDE when it's already open — clicking a function should never
   // pop the editor open by itself.
-  const editorOpen = useStore((s) => s.editorFileId !== null)
+  const editorOpen = useStore((s) => (s.editorFileIds || []).includes(data.fileId))
 
   return (
     <div

@@ -17,6 +17,7 @@ import FloatingEditor from './FloatingEditor'
  */
 export default function Layout() {
   const fetchSupabaseFiles = useStore((s) => s.fetchSupabaseFiles)
+  const editorFileIds = useStore((s) => s.editorFileIds || [])
 
   useEffect(() => {
     fetchSupabaseFiles()
@@ -51,7 +52,9 @@ export default function Layout() {
       </PanelGroup>
 
       <TerminalModal />
-      <FloatingEditor />
+      {editorFileIds.map((fileId) => (
+        <FloatingEditor key={fileId} fileId={fileId} />
+      ))}
     </div>
   )
 }

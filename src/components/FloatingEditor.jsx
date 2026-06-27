@@ -10,8 +10,7 @@ import { supabase } from '../lib/supabase'
  *             function pill on the canvas. Toggle to Edit for an editable view.
  *   • image → image viewer   • audio → audio player
  */
-export default function FloatingEditor() {
-  const editorFileId = useStore((s) => s.editorFileId)
+export default function FloatingEditor({ fileId }) {
   const projectFiles = useStore((s) => s.projectFiles)
   const closeEditor = useStore((s) => s.closeEditor)
   const setFileEdit = useStore((s) => s.setFileEdit)
@@ -19,8 +18,10 @@ export default function FloatingEditor() {
   const fileEdits = useStore((s) => s.fileEdits)
   const saveProjectFile = useStore((s) => s.saveProjectFile)
   const supabaseLoading = useStore((s) => s.supabaseLoading)
+  const activeEditorFileId = useStore((s) => s.activeEditorFileId)
+  const setActiveEditor = useStore((s) => s.setActiveEditor)
   // subscribe so the textarea re-renders on external content changes
-  const content = useStore((s) => (editorFileId ? getFileContent(s, editorFileId) : ''))
+  const content = useStore((s) => getFileContent(s, fileId))
   const scrollTarget = useStore((s) => s.editorScrollTarget)
 
   const [tab, setTab] = useState('code') // 'code' | 'ai'
@@ -32,7 +33,7 @@ export default function FloatingEditor() {
   const scrollRef = useRef(null)
   const hotLineRef = useRef(null)
 
-  const file = editorFileId ? projectFiles[editorFileId] : null
+  const file = projectFiles[fileId]
   const lines = useMemo(() => content.split('\n'), [content])
   const fns = useMemo(() => (file?.kind === 'text' ? parseFunctions(content) : []), [content, file?.kind])
 
@@ -44,21 +45,24 @@ export default function FloatingEditor() {
 
   // Reset view each time a new file opens.
   useEffect(() => {
-    if (editorFileId) {
-      setPos({ x: Math.max(24, window.innerWidth - 490), y: 90 })
+    if (fileId) {
+      const openIds = useStore.getState().editorFileIds || []
+      const index = openIds.indexOf(fileId)
+      const offset = index >= 0 ? index * 30 : 0
+      setPos({ x: Math.max(24, window.innerWidth - 490 - offset), y: 90 + offset })
       setTab('code')
       setEditMode(false)
       setHighlight(null)
     }
-  }, [editorFileId])
+  }, [fileId])
 
   // A function pill on the canvas was clicked.
   useEffect(() => {
-    if (!scrollTarget || !editorFileId) return
-    const f = useStore.getState().projectFiles[editorFileId]
+    if (!scrollTarget || !fileId) return
+    const f = useStore.getState().projectFiles[fileId]
     if (!f || f.kind !== 'text' || scrollTarget.path !== f.path) return
     jumpTo(scrollTarget.line, scrollTarget.endLine)
-  }, [scrollTarget, editorFileId])
+  }, [scrollTarget, fileId])
 
   // Scroll the highlighted chunk into view, contained to the panel's scroller.
   useEffect(() => {
@@ -95,21 +99,32 @@ export default function FloatingEditor() {
   }, [])
 
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && closeEditor()
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        const currentActive = useStore.getState().activeEditorFileId
+        if (currentActive === fileId) {
+          closeEditor(fileId)
+        }
+      }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [closeEditor])
+  }, [closeEditor, fileId])
 
-  if (!editorFileId || !file) return null
+  if (!fileId || !file) return null
 
   const edited = file.path in fileEdits
   const startDrag = (e) => {
+    setActiveEditor(fileId)
     drag.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y }
   }
 
+  const isActive = activeEditorFileId === fileId
+
   return (
     <div
-      className="fixed z-50 flex w-[480px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-slate-700 bg-paper shadow-2xl"
+      onMouseDown={() => setActiveEditor(fileId)}
+      className={`fixed flex w-[480px] max-w-[92vw] flex-col overflow-hidden rounded-xl border transition-all duration-150 bg-paper shadow-2xl ${isActive ? 'z-[60] border-indigo-500 shadow-indigo-500/10' : 'z-50 border-slate-700'}`}
       style={{ left: pos.x, top: pos.y, height: file.kind === 'text' ? 460 : 'auto' }}
     >
       {/* title bar (drag handle) */}
@@ -120,7 +135,7 @@ export default function FloatingEditor() {
         <span className="ml-1 truncate font-mono text-xs text-slate-300">{file.path}</span>
         {edited && <span className="rounded bg-amber-500/20 px-1.5 text-[10px] text-amber-300">● edited</span>}
         <span className="ml-auto rounded bg-slate-800 px-1.5 text-[10px] uppercase text-slate-400">{file.kind}</span>
-        <button onClick={closeEditor} className="text-slate-500 hover:text-slate-100">✕</button>
+        <button onClick={() => closeEditor(fileId)} className="text-slate-500 hover:text-slate-100">✕</button>
       </div>
 
       {/* body */}
