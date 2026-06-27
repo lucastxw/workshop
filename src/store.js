@@ -2,6 +2,41 @@ import { create } from 'zustand'
 import { buildProjectGraph, FILE_SOURCE, kindOf, dirname, parseImports, resolveImport } from './projectGraph'
 import { supabase } from './lib/supabase'
 
+function buildProjectEdges(projectFiles) {
+  const allPaths = new Set(Object.keys(projectFiles))
+  const projectEdges = []
+
+  for (const path of Object.keys(projectFiles)) {
+    const file = projectFiles[path]
+    if (file.kind !== 'text') continue
+    const source = file.source ?? FILE_SOURCE[path]
+    if (typeof source !== 'string') continue
+
+    for (const spec of parseImports(source)) {
+      const target = resolveImport(path, spec, allPaths)
+      if (!target || target === path) continue
+      if (!projectEdges.some((edge) => edge.source === path && edge.target === target)) {
+        projectEdges.push({ source: path, target })
+      }
+    }
+  }
+
+  return projectEdges
+}
+
+function createProjectFileRecord(file, position) {
+  return {
+    id: file.path,
+    path: file.path,
+    name: file.name,
+    folder: file.folder || dirname(file.path),
+    kind: file.kind,
+    position,
+    url: file.url || null,
+    source: file.source ?? null,
+  }
+}
+
 function rectsOverlap(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
 }
@@ -322,177 +357,142 @@ export const useStore = create((set, get) => ({
   },
 
   addProjectFiles: async (newFiles) => {
+    const incomingFiles = Array.isArray(newFiles) ? newFiles : [newFiles]
+    const normalizedFiles = incomingFiles
+      .filter((file) => file?.path)
+      .map((file) => ({
+        ...file,
+        path: file.path || `/${file.name}`,
+        folder: file.folder || dirname(file.path || `/${file.name}`),
+        kind: file.kind || kindOf(file.name),
+      }))
+
+    if (normalizedFiles.length === 0) return
+
+    const state = get()
+    const projectFiles = { ...state.projectFiles }
+    const projectFolders = { ...state.projectFolders }
+    const occupiedRects = [
+      ...Object.values(projectFiles).map((file) => ({ x: file.position.x, y: file.position.y, w: 178, h: 64 })),
+      ...Object.values(projectFolders).map((folder) => ({ x: folder.position.x, y: folder.position.y, w: folder.size.width, h: folder.size.height })),
+      ...Object.values(state.subspaces).map((subspace) => ({ x: subspace.position.x, y: subspace.position.y, w: subspace.size.width, h: subspace.size.height })),
+    ]
+
+    const filesToPlace = normalizedFiles.filter((file) => !projectFiles[file.path])
+    if (filesToPlace.length === 0) return
+
+    const importGrid = findAvailableProjectGridStart(occupiedRects, filesToPlace.length)
+    const insertedRecords = []
+
+    for (const [index, file] of filesToPlace.entries()) {
+      const folder = file.folder || dirname(file.path)
+      const position =
+        file.position || {
+          x: importGrid.x + (index % importGrid.side) * 220,
+          y: importGrid.y + Math.floor(index / importGrid.side) * 120,
+        }
+
+      const record = createProjectFileRecord(file, position)
+      projectFiles[file.path] = record
+      insertedRecords.push({ file, record })
+
+      occupiedRects.push({ x: position.x, y: position.y, w: 178, h: 64 })
+
+      if (!projectFolders[folder]) {
+        projectFolders[folder] = {
+          id: folder,
+          name: folder === '/' ? 'project root' : folder,
+          position: { x: Object.keys(projectFolders).length * 940, y: 0 },
+          size: { width: 380, height: 240 },
+        }
+      }
+    }
+
+    set({
+      projectFiles,
+      projectFolders,
+      projectEdges: buildProjectEdges(projectFiles),
+    })
+
     if (!supabase) {
-      set((state) => {
-        const projectFiles = { ...state.projectFiles }
-        const projectFolders = { ...state.projectFolders }
-        const projectEdges = [...state.projectEdges]
-        const allPaths = new Set(Object.keys(projectFiles))
-        const occupiedRects = [
-          ...Object.values(projectFiles).map((file) => ({ x: file.position.x, y: file.position.y, w: 178, h: 64 })),
-          ...Object.values(projectFolders).map((folder) => ({ x: folder.position.x, y: folder.position.y, w: folder.size.width, h: folder.size.height })),
-          ...Object.values(state.subspaces).map((subspace) => ({ x: subspace.position.x, y: subspace.position.y, w: subspace.size.width, h: subspace.size.height })),
-        ]
-
-        const filesToPlace = newFiles.filter((file) => !projectFiles[file.path])
-        const importGrid = findAvailableProjectGridStart(occupiedRects, filesToPlace.length)
-
-        for (const [index, file] of filesToPlace.entries()) {
-          const folder = file.folder || dirname(file.path)
-          const position =
-            file.position || {
-              x: importGrid.x + (index % importGrid.side) * 220,
-              y: importGrid.y + Math.floor(index / importGrid.side) * 120,
-            }
-
-          projectFiles[file.path] = {
-            id: file.path,
-            path: file.path,
-            name: file.name,
-            folder,
-            kind: file.kind,
-            position,
-            url: file.url || null,
-            source: file.source || null,
-          }
-
-          allPaths.add(file.path)
-          occupiedRects.push({ x: position.x, y: position.y, w: 178, h: 64 })
-
-          if (!projectFolders[folder]) {
-            projectFolders[folder] = {
-              id: folder,
-              name: folder === '/' ? 'project root' : folder,
-              position: { x: Object.keys(projectFolders).length * 940, y: 0 },
-              size: { width: 380, height: 240 },
-            }
-          }
-        }
-
-        for (const path of Object.keys(projectFiles)) {
-          const file = projectFiles[path]
-          if (file.kind !== 'text') continue
-          const source = file.source ?? FILE_SOURCE[path]
-          if (typeof source !== 'string') continue
-          for (const spec of parseImports(source)) {
-            const target = resolveImport(path, spec, allPaths)
-            if (!target || target === path) continue
-            if (!projectEdges.some((e) => e.source === path && e.target === target)) {
-              projectEdges.push({ source: path, target })
-            }
-          }
-        }
-
-        return { projectFiles, projectFolders, projectEdges }
-      })
+      set({ supabaseError: null })
       return
     }
 
-    set({ supabaseLoading: true, supabaseError: null })
-    try {
-      const state = get()
-      const projectFiles = { ...state.projectFiles }
-      const projectFolders = { ...state.projectFolders }
-      const projectEdges = [...state.projectEdges]
-      const allPaths = new Set(Object.keys(projectFiles))
-      const occupiedRects = [
-        ...Object.values(projectFiles).map((file) => ({ x: file.position.x, y: file.position.y, w: 178, h: 64 })),
-        ...Object.values(projectFolders).map((folder) => ({ x: folder.position.x, y: folder.position.y, w: folder.size.width, h: folder.size.height })),
-        ...Object.values(state.subspaces).map((subspace) => ({ x: subspace.position.x, y: subspace.position.y, w: subspace.size.width, h: subspace.size.height })),
-      ]
+    set({ supabaseLoading: true })
 
-      const filesToPlace = newFiles.filter((file) => !projectFiles[file.path])
-      const importGrid = findAvailableProjectGridStart(occupiedRects, filesToPlace.length)
+    void (async () => {
+      const failures = []
 
-      const dbInserts = []
+      for (const { file, record } of insertedRecords) {
+        try {
+          let fileUrl = record.url
+          let source = record.source
 
-      for (const [index, file] of filesToPlace.entries()) {
-        const folder = file.folder || dirname(file.path)
-        const position =
-          file.position || {
-            x: importGrid.x + (index % importGrid.side) * 220,
-            y: importGrid.y + Math.floor(index / importGrid.side) * 120,
+          if (file.kind === 'text' && file.rawFile && source == null) {
+            source = await file.rawFile.text()
           }
 
-        let fileUrl = file.url || null
+          if ((file.kind === 'image' || file.kind === 'audio') && file.rawFile) {
+            const fileExt = file.name.split('.').pop() || 'bin'
+            const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`
+            const filePath = `${file.kind}s/${fileName}`
 
-        if ((file.kind === 'image' || file.kind === 'audio') && file.rawFile) {
-          const fileExt = file.name.split('.').pop()
-          const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`
-          const filePath = `${file.kind}s/${fileName}`
+            const { error: uploadError } = await supabase.storage
+              .from('files-bucket')
+              .upload(filePath, file.rawFile, {
+                cacheControl: '3600',
+                upsert: false,
+              })
 
-          const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('files-bucket')
-            .upload(filePath, file.rawFile, {
-              cacheControl: '3600',
-              upsert: false
-            })
+            if (uploadError) throw uploadError
 
-          if (uploadError) throw uploadError
-
-          const { data: { publicUrl } } = supabase.storage
-            .from('files-bucket')
-            .getPublicUrl(filePath)
-
-          fileUrl = publicUrl
-        }
-
-        const newFileRecord = {
-          id: file.path,
-          path: file.path,
-          name: file.name,
-          folder,
-          kind: file.kind,
-          url: fileUrl,
-          source: file.source || null,
-          position,
-        }
-
-        dbInserts.push(newFileRecord)
-
-        projectFiles[file.path] = newFileRecord
-        allPaths.add(file.path)
-        occupiedRects.push({ x: position.x, y: position.y, w: 178, h: 64 })
-
-        if (!projectFolders[folder]) {
-          projectFolders[folder] = {
-            id: folder,
-            name: folder === '/' ? 'project root' : folder,
-            position: { x: Object.keys(projectFolders).length * 940, y: 0 },
-            size: { width: 380, height: 240 },
+            const { data: { publicUrl } } = supabase.storage.from('files-bucket').getPublicUrl(filePath)
+            fileUrl = publicUrl
           }
+
+          const persistedRecord = {
+            ...record,
+            url: fileUrl,
+            source,
+          }
+
+          const { error: dbError } = await supabase
+            .from('project_files')
+            .upsert(persistedRecord, { onConflict: 'path' })
+
+          if (dbError) throw dbError
+
+          set((state) => {
+            const projectFiles = { ...state.projectFiles }
+            if (projectFiles[record.path]) {
+              projectFiles[record.path] = { ...projectFiles[record.path], ...persistedRecord }
+            }
+            return { projectFiles, projectEdges: buildProjectEdges(projectFiles) }
+          })
+        } catch (error) {
+          failures.push(error)
+          console.error('Error syncing imported file:', error)
+          set((state) => {
+            const projectFiles = { ...state.projectFiles }
+            if (projectFiles[record.path]) {
+              projectFiles[record.path] = {
+                ...projectFiles[record.path],
+                uploadError: error.message || 'Unable to sync file',
+              }
+            }
+            return { projectFiles }
+          })
         }
       }
 
-      if (dbInserts.length > 0) {
-        const { error: dbError } = await supabase
-          .from('project_files')
-          .upsert(dbInserts, { onConflict: 'path' })
-
-        if (dbError) throw dbError
+      if (failures.length > 0) {
+        set({ supabaseError: failures[0].message || 'Some files could not be synced' })
+      } else {
+        set({ supabaseError: null })
       }
-
-      for (const path of Object.keys(projectFiles)) {
-        const file = projectFiles[path]
-        if (file.kind !== 'text') continue
-        const source = file.source ?? FILE_SOURCE[path]
-        if (typeof source !== 'string') continue
-        for (const spec of parseImports(source)) {
-          const target = resolveImport(path, spec, allPaths)
-          if (!target || target === path) continue
-          if (!projectEdges.some((e) => e.source === path && e.target === target)) {
-            projectEdges.push({ source: path, target })
-          }
-        }
-      }
-
-      set({ projectFiles, projectFolders, projectEdges })
-    } catch (e) {
-      console.error('Error adding files to Supabase:', e)
-      set({ supabaseError: e.message })
-    } finally {
       set({ supabaseLoading: false })
-    }
+    })()
   },
 
   deleteProjectFile: async (id) => {
