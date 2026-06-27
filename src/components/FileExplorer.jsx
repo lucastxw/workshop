@@ -28,6 +28,7 @@ export default function FileExplorer() {
   const selectedProjectFileId = useStore((s) => s.selectedProjectFileId)
   const selectProjectFile = useStore((s) => s.selectProjectFile)
   const requestFocus = useStore((s) => s.requestFocus)
+  const openEditor = useStore((s) => s.openEditor)
   const projectFolderFilter = useStore((s) => s.projectFolderFilter)
   const setProjectFolderFilter = useStore((s) => s.setProjectFolderFilter)
   const clearProjectFolderFilter = useStore((s) => s.clearProjectFolderFilter)
@@ -152,7 +153,10 @@ export default function FileExplorer() {
                 <button
                   key={f.id}
                   onClick={() => onPick(f)}
-                  onDoubleClick={() => !isProject && openTerminal(f.id)}
+                  onDoubleClick={() => {
+                    if (isProject) openEditor(f.id)
+                    else openTerminal(f.id)
+                  }}
                   className={[
                     'group flex w-full items-center gap-2 py-1 pl-7 pr-3 text-left text-[13px] transition-colors',
                     active

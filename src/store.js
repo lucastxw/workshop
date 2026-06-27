@@ -172,7 +172,7 @@ export const useStore = create((set, get) => ({
 
   setViewMode: (mode) => set({ viewMode: mode, focusedNodeId: null, selectedProjectFileId: null }),
   // Single, deliberate selection (explorer / search) — also opens the IDE/viewer.
-  selectProjectFile: (id) => set({ selectedProjectFileId: id, selectedFileIds: id ? [id] : [], editorFileId: id || null }),
+  selectProjectFile: (id) => set({ selectedProjectFileId: id, selectedFileIds: id ? [id] : [] }),
   clearProjectSelection: () => set({ selectedProjectFileId: null, selectedFileIds: [] }),
   // Multi-selection from React Flow (marquee / ctrl-click). One file → active.
   // 2+ files closes any open overlay (IDE / image / audio) — multi-select is for

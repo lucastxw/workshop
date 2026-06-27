@@ -117,11 +117,6 @@ export default function FloatingEditor() {
         onMouseDown={startDrag}
         className="flex cursor-grab items-center gap-2 border-b border-slate-800 bg-slate-900 px-3 py-2 active:cursor-grabbing"
       >
-        <span className="flex gap-1.5">
-          <span className="h-3 w-3 rounded-full bg-rose-500" />
-          <span className="h-3 w-3 rounded-full bg-amber-500" />
-          <span className="h-3 w-3 rounded-full bg-emerald-500" />
-        </span>
         <span className="ml-1 truncate font-mono text-xs text-slate-300">{file.path}</span>
         {edited && <span className="rounded bg-amber-500/20 px-1.5 text-[10px] text-amber-300">● edited</span>}
         <span className="ml-auto rounded bg-slate-800 px-1.5 text-[10px] uppercase text-slate-400">{file.kind}</span>

@@ -41,12 +41,11 @@ function ProjectFileNode({ id, data }) {
 
   return (
     <div
-      // Plain click opens the IDE/viewer; React Flow handles the selection itself.
-      // Ctrl/⌘-click only multi-selects (for moving) — don't open the IDE.
-      onClick={(e) => {
-        if (!(e.ctrlKey || e.metaKey)) openEditor(id)
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        openEditor(id)
       }}
-      title="Click to open · drag a box / Ctrl+click to multi-select · drag a selected file to move the group"
+      title="Double-click to open · drag a box / Ctrl+click to multi-select · drag a selected file to move the group"
       className={[
         'flex h-full w-full cursor-pointer flex-col rounded-lg border px-3 py-2 transition-all duration-200',
         shell,

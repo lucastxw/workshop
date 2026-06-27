@@ -169,18 +169,31 @@ function Flow() {
         .filter((f) => !projectFolderFilter || f.folder === projectFolderFilter)
         .map((f) => f.id),
     )
-    if (projectFolderFilter && !visibleIds.has(selectedProjectFileId)) return []
-    const focus = getProjectFocus({ selectedProjectFileId, projectEdges })
-    if (!focus) return []
+    const selectedIds = selectedFileIds.length > 0 ? selectedFileIds : selectedProjectFileId ? [selectedProjectFileId] : []
+    if (projectFolderFilter && selectedIds.every((id) => !visibleIds.has(id))) return []
+    const edgeIds = new Set()
     const E = []
-    focus.downstream
-      .filter((t) => visibleIds.has(t))
-      .forEach((t, i) => E.push(makeEdge(focus.id, t, DOWNSTREAM_COLOR, { lane: i, bow: 'down' })))
-    focus.upstream
-      .filter((srcId) => visibleIds.has(srcId))
-      .forEach((srcId, i) => E.push(makeEdge(srcId, focus.id, UPSTREAM_COLOR, { lane: i, bow: 'up' })))
+    for (const id of selectedIds) {
+      if (!visibleIds.has(id)) continue
+      for (const e of projectEdges) {
+        if (e.source === id && visibleIds.has(e.target)) {
+          const key = `${e.source}-${e.target}`
+          if (!edgeIds.has(key)) {
+            edgeIds.add(key)
+            E.push(makeEdge(e.source, e.target, DOWNSTREAM_COLOR, { lane: E.length, bow: 'down' }))
+          }
+        }
+        if (e.target === id && visibleIds.has(e.source)) {
+          const key = `${e.source}-${e.target}`
+          if (!edgeIds.has(key)) {
+            edgeIds.add(key)
+            E.push(makeEdge(e.source, e.target, UPSTREAM_COLOR, { lane: E.length, bow: 'up' }))
+          }
+        }
+      }
+    }
     return E
-  }, [selectedProjectFileId, projectEdges, projectFiles, projectFolderFilter])
+  }, [selectedProjectFileId, selectedFileIds, projectEdges, projectFiles, projectFolderFilter])
 
   /* ---------- node changes: apply selection AND drag-position to the store ---------- */
   const onNodesChange = useCallback(
