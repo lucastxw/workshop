@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, getFileContent } from '../store'
 import { parseFunctions } from '../projectGraph'
 import AiSummary from './AiSummary'
+import { supabase } from '../lib/supabase'
 
 /* Floating, draggable panel opened when a project file is clicked:
  *   • text  → a line-numbered code viewer that highlights a function's lines.
@@ -16,6 +17,9 @@ export default function FloatingEditor() {
   const setFileEdit = useStore((s) => s.setFileEdit)
   const revertFileEdit = useStore((s) => s.revertFileEdit)
   const fileEdits = useStore((s) => s.fileEdits)
+  const saveProjectFile = useStore((s) => s.saveProjectFile)
+  const supabaseLoading = useStore((s) => s.supabaseLoading)
+  // subscribe so the textarea re-renders on external content changes
   const content = useStore((s) => (editorFileId ? getFileContent(s, editorFileId) : ''))
   const scrollTarget = useStore((s) => s.editorScrollTarget)
 
@@ -168,8 +172,56 @@ export default function FloatingEditor() {
                     L{highlight.start}–{highlight.end}
                   </span>
                 )}
-                <span className="ml-auto">{lines.length} lines</span>
+                <span className="ml-auto text-slate-500">
+                  {lines.length} lines · {supabase ? 'Supabase mode' : 'local mode'}
+                </span>
+                <button
+                  disabled={!edited || supabaseLoading}
+                  onClick={() => saveProjectFile(file.path)}
+                  className="rounded bg-indigo-600 px-3 py-1 font-semibold text-white enabled:hover:bg-indigo-500 disabled:opacity-40 transition"
+                >
+                  {supabaseLoading ? 'Saving...' : 'Save'}
+                </button>
               </div>
+
+              {editMode ? (
+                <textarea
+                  spellCheck={false}
+                  value={content}
+                  onChange={(e) => setFileEdit(file.path, e.target.value)}
+                  className="thin-scroll min-h-0 flex-1 resize-none bg-[#0b0e14] p-3 font-mono text-[12.5px] leading-5 text-slate-200 outline-none"
+                />
+              ) : (
+                <div ref={scrollRef} className="thin-scroll min-h-0 flex-1 overflow-auto bg-[#0b0e14] py-2 font-mono text-[12.5px] leading-5">
+                  <div className="w-max min-w-full">
+                    {lines.map((ln, i) => {
+                      const n = i + 1
+                      const hot = highlight && n >= highlight.start && n <= highlight.end
+                      return (
+                        <div
+                          key={i}
+                          ref={hot && n === highlight.start ? hotLineRef : undefined}
+                          className={hot ? 'bg-indigo-500/25 ring-1 ring-inset ring-indigo-500/30' : ''}
+                        >
+                          <span
+                            className={[
+                              'sticky left-0 inline-block w-12 select-none px-2 text-right tabular-nums',
+                              hot ? 'bg-indigo-600/40 font-semibold text-indigo-200' : 'bg-[#0b0e14] text-slate-600',
+                            ].join(' ')}
+                          >
+                            {n}
+                          </span>
+                          <span className="whitespace-pre pr-4 text-slate-200">{ln === '' ? ' ' : ln}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <AiSummary file={file} content={content} />
+          )}
 
               {editMode ? (
                 <textarea

@@ -1,4 +1,6 @@
+import { useEffect } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import { useStore } from '../store'
 import FileExplorer from './FileExplorer'
 import BookmarkManager from './BookmarkManager'
 import MapView from './MapView'
@@ -14,6 +16,12 @@ import FloatingEditor from './FloatingEditor'
  *  Left column = 30% (vertically split 50/50), right column = 70%.
  */
 export default function Layout() {
+  const fetchSupabaseFiles = useStore((s) => s.fetchSupabaseFiles)
+
+  useEffect(() => {
+    fetchSupabaseFiles()
+  }, [fetchSupabaseFiles])
+
   return (
     <div className="h-screen w-screen overflow-hidden bg-canvas text-slate-200">
       <PanelGroup direction="horizontal">

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { buildProjectGraph, FILE_SOURCE, kindOf, dirname, parseImports, resolveImport } from './projectGraph'
+import { supabase } from './lib/supabase'
 
 function rectsOverlap(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
@@ -189,8 +190,202 @@ export const useStore = create((set, get) => ({
   scrollEditorToLine: (path, line, endLine) =>
     set((s) => ({ editorScrollTarget: { path, line, endLine: endLine || line, nonce: (s.editorScrollTarget?.nonce || 0) + 1 } })),
 
-  addProjectFiles: (newFiles) =>
-    set((state) => {
+  // --- Supabase State ---
+  supabaseLoading: false,
+  supabaseError: null,
+
+  fetchSupabaseFiles: async () => {
+    if (!supabase) return
+    set({ supabaseLoading: true, supabaseError: null })
+    try {
+      const { data, error } = await supabase
+        .from('project_files')
+        .select('*')
+        .order('path', { ascending: true })
+
+      if (error) throw error
+
+      if (data && data.length > 0) {
+        const projectFiles = {}
+        const projectFolders = {}
+        const projectEdges = []
+        const allPaths = new Set()
+
+        for (const file of data) {
+          projectFiles[file.path] = {
+            id: file.path,
+            path: file.path,
+            name: file.name,
+            folder: file.folder,
+            kind: file.kind,
+            url: file.url,
+            source: file.source,
+            position: file.position || { x: 0, y: 0 },
+          }
+          allPaths.add(file.path)
+
+          if (!projectFolders[file.folder]) {
+            projectFolders[file.folder] = {
+              id: file.folder,
+              name: file.folder === '/' ? 'project root' : file.folder,
+              position: { x: Object.keys(projectFolders).length * 940, y: 0 },
+              size: { width: 380, height: 240 },
+            }
+          }
+        }
+
+        // Re-evaluate edges
+        for (const path of Object.keys(projectFiles)) {
+          const file = projectFiles[path]
+          if (file.kind !== 'text') continue
+          const source = file.source
+          if (typeof source !== 'string') continue
+          for (const spec of parseImports(source)) {
+            const target = resolveImport(path, spec, allPaths)
+            if (!target || target === path) continue
+            if (!projectEdges.some((e) => e.source === path && e.target === target)) {
+              projectEdges.push({ source: path, target })
+            }
+          }
+        }
+
+        set({ projectFiles, projectFolders, projectEdges })
+      }
+    } catch (e) {
+      console.error('Error fetching files from Supabase:', e)
+      set({ supabaseError: e.message })
+    } finally {
+      set({ supabaseLoading: false })
+    }
+  },
+
+  persistProjectFilePosition: async (id, position) => {
+    if (!supabase) return
+    try {
+      const { error } = await supabase
+        .from('project_files')
+        .update({ position })
+        .eq('path', id)
+      if (error) throw error
+    } catch (e) {
+      console.error('Error persisting node position to Supabase:', e)
+    }
+  },
+
+  saveProjectFile: async (path) => {
+    const state = get()
+    const content = state.fileEdits[path]
+    if (content === undefined) return
+
+    if (!supabase) {
+      set((s) => {
+        const projectFiles = { ...s.projectFiles }
+        if (projectFiles[path]) {
+          projectFiles[path] = { ...projectFiles[path], source: content }
+        }
+        const fileEdits = { ...s.fileEdits }
+        delete fileEdits[path]
+        return { projectFiles, fileEdits }
+      })
+      return
+    }
+
+    set({ supabaseLoading: true, supabaseError: null })
+    try {
+      const { error } = await supabase
+        .from('project_files')
+        .update({ source: content })
+        .eq('path', path)
+
+      if (error) throw error
+
+      set((s) => {
+        const projectFiles = { ...s.projectFiles }
+        if (projectFiles[path]) {
+          projectFiles[path] = { ...projectFiles[path], source: content }
+        }
+        const fileEdits = { ...s.fileEdits }
+        delete fileEdits[path]
+        return { projectFiles, fileEdits }
+      })
+    } catch (e) {
+      console.error('Error saving file to Supabase:', e)
+      set({ supabaseError: e.message })
+    } finally {
+      set({ supabaseLoading: false })
+    }
+  },
+
+  addProjectFiles: async (newFiles) => {
+    if (!supabase) {
+      set((state) => {
+        const projectFiles = { ...state.projectFiles }
+        const projectFolders = { ...state.projectFolders }
+        const projectEdges = [...state.projectEdges]
+        const allPaths = new Set(Object.keys(projectFiles))
+        const occupiedRects = [
+          ...Object.values(projectFiles).map((file) => ({ x: file.position.x, y: file.position.y, w: 178, h: 64 })),
+          ...Object.values(projectFolders).map((folder) => ({ x: folder.position.x, y: folder.position.y, w: folder.size.width, h: folder.size.height })),
+          ...Object.values(state.subspaces).map((subspace) => ({ x: subspace.position.x, y: subspace.position.y, w: subspace.size.width, h: subspace.size.height })),
+        ]
+
+        const filesToPlace = newFiles.filter((file) => !projectFiles[file.path])
+        const importGrid = findAvailableProjectGridStart(occupiedRects, filesToPlace.length)
+
+        for (const [index, file] of filesToPlace.entries()) {
+          const folder = file.folder || dirname(file.path)
+          const position =
+            file.position || {
+              x: importGrid.x + (index % importGrid.side) * 220,
+              y: importGrid.y + Math.floor(index / importGrid.side) * 120,
+            }
+
+          projectFiles[file.path] = {
+            id: file.path,
+            path: file.path,
+            name: file.name,
+            folder,
+            kind: file.kind,
+            position,
+            url: file.url || null,
+            source: file.source || null,
+          }
+
+          allPaths.add(file.path)
+          occupiedRects.push({ x: position.x, y: position.y, w: 178, h: 64 })
+
+          if (!projectFolders[folder]) {
+            projectFolders[folder] = {
+              id: folder,
+              name: folder === '/' ? 'project root' : folder,
+              position: { x: Object.keys(projectFolders).length * 940, y: 0 },
+              size: { width: 380, height: 240 },
+            }
+          }
+        }
+
+        for (const path of Object.keys(projectFiles)) {
+          const file = projectFiles[path]
+          if (file.kind !== 'text') continue
+          const source = file.source ?? FILE_SOURCE[path]
+          if (typeof source !== 'string') continue
+          for (const spec of parseImports(source)) {
+            const target = resolveImport(path, spec, allPaths)
+            if (!target || target === path) continue
+            if (!projectEdges.some((e) => e.source === path && e.target === target)) {
+              projectEdges.push({ source: path, target })
+            }
+          }
+        }
+
+        return { projectFiles, projectFolders, projectEdges }
+      })
+      return
+    }
+
+    set({ supabaseLoading: true, supabaseError: null })
+    try {
+      const state = get()
       const projectFiles = { ...state.projectFiles }
       const projectFolders = { ...state.projectFolders }
       const projectEdges = [...state.projectEdges]
@@ -204,6 +399,8 @@ export const useStore = create((set, get) => ({
       const filesToPlace = newFiles.filter((file) => !projectFiles[file.path])
       const importGrid = findAvailableProjectGridStart(occupiedRects, filesToPlace.length)
 
+      const dbInserts = []
+
       for (const [index, file] of filesToPlace.entries()) {
         const folder = file.folder || dirname(file.path)
         const position =
@@ -212,17 +409,43 @@ export const useStore = create((set, get) => ({
             y: importGrid.y + Math.floor(index / importGrid.side) * 120,
           }
 
-        projectFiles[file.path] = {
+        let fileUrl = file.url || null
+
+        if ((file.kind === 'image' || file.kind === 'audio') && file.rawFile) {
+          const fileExt = file.name.split('.').pop()
+          const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`
+          const filePath = `${file.kind}s/${fileName}`
+
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('files-bucket')
+            .upload(filePath, file.rawFile, {
+              cacheControl: '3600',
+              upsert: false
+            })
+
+          if (uploadError) throw uploadError
+
+          const { data: { publicUrl } } = supabase.storage
+            .from('files-bucket')
+            .getPublicUrl(filePath)
+
+          fileUrl = publicUrl
+        }
+
+        const newFileRecord = {
           id: file.path,
           path: file.path,
           name: file.name,
           folder,
           kind: file.kind,
-          position,
-          url: file.url || null,
+          url: fileUrl,
           source: file.source || null,
+          position,
         }
 
+        dbInserts.push(newFileRecord)
+
+        projectFiles[file.path] = newFileRecord
         allPaths.add(file.path)
         occupiedRects.push({ x: position.x, y: position.y, w: 178, h: 64 })
 
@@ -234,6 +457,14 @@ export const useStore = create((set, get) => ({
             size: { width: 380, height: 240 },
           }
         }
+      }
+
+      if (dbInserts.length > 0) {
+        const { error: dbError } = await supabase
+          .from('project_files')
+          .upsert(dbInserts, { onConflict: 'path' })
+
+        if (dbError) throw dbError
       }
 
       for (const path of Object.keys(projectFiles)) {
@@ -250,28 +481,87 @@ export const useStore = create((set, get) => ({
         }
       }
 
-      return { projectFiles, projectFolders, projectEdges }
-    }),
-  deleteProjectFile: (id) =>
-    set((state) => {
-      const projectFiles = { ...state.projectFiles }
-      const projectFolders = { ...state.projectFolders }
-      const projectEdges = state.projectEdges.filter((e) => e.source !== id && e.target !== id)
+      set({ projectFiles, projectFolders, projectEdges })
+    } catch (e) {
+      console.error('Error adding files to Supabase:', e)
+      set({ supabaseError: e.message })
+    } finally {
+      set({ supabaseLoading: false })
+    }
+  },
 
-      delete projectFiles[id]
-      const folder = state.projectFiles[id]?.folder
-      if (folder) {
-        const stillInFolder = Object.values(projectFiles).some((file) => file.folder === folder)
-        if (!stillInFolder) delete projectFolders[folder]
+  deleteProjectFile: async (id) => {
+    if (!supabase) {
+      set((state) => {
+        const projectFiles = { ...state.projectFiles }
+        const projectFolders = { ...state.projectFolders }
+        const projectEdges = state.projectEdges.filter((e) => e.source !== id && e.target !== id)
+
+        delete projectFiles[id]
+        const folder = state.projectFiles[id]?.folder
+        if (folder) {
+          const stillInFolder = Object.values(projectFiles).some((file) => file.folder === folder)
+          if (!stillInFolder) delete projectFolders[folder]
+        }
+
+        return {
+          projectFiles,
+          projectFolders,
+          projectEdges,
+          selectedProjectFileId: state.selectedProjectFileId === id ? null : state.selectedProjectFileId,
+        }
+      })
+      return
+    }
+
+    set({ supabaseLoading: true, supabaseError: null })
+    try {
+      const state = get()
+      const file = state.projectFiles[id]
+      if (file && file.url && file.url.includes('files-bucket')) {
+        const bucketPath = file.url.split('/files-bucket/')[1]
+        if (bucketPath) {
+          const { error: storageError } = await supabase.storage
+            .from('files-bucket')
+            .remove([bucketPath])
+
+          if (storageError) console.error('Error deleting file from storage:', storageError)
+        }
       }
 
-      return {
-        projectFiles,
-        projectFolders,
-        projectEdges,
-        selectedProjectFileId: state.selectedProjectFileId === id ? null : state.selectedProjectFileId,
-      }
-    }),
+      const { error: dbError } = await supabase
+        .from('project_files')
+        .delete()
+        .eq('path', id)
+
+      if (dbError) throw dbError
+
+      set((state) => {
+        const projectFiles = { ...state.projectFiles }
+        const projectFolders = { ...state.projectFolders }
+        const projectEdges = state.projectEdges.filter((e) => e.source !== id && e.target !== id)
+
+        delete projectFiles[id]
+        const folder = state.projectFiles[id]?.folder
+        if (folder) {
+          const stillInFolder = Object.values(projectFiles).some((file) => file.folder === folder)
+          if (!stillInFolder) delete projectFolders[folder]
+        }
+
+        return {
+          projectFiles,
+          projectFolders,
+          projectEdges,
+          selectedProjectFileId: state.selectedProjectFileId === id ? null : state.selectedProjectFileId,
+        }
+      })
+    } catch (e) {
+      console.error('Error deleting file from Supabase:', e)
+      set({ supabaseError: e.message })
+    } finally {
+      set({ supabaseLoading: false })
+    }
+  },
 
   // --- AI (Claude) file explanations ---
   apiKey: (typeof localStorage !== 'undefined' && localStorage.getItem('anthropic_api_key')) || '',

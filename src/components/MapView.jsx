@@ -73,6 +73,7 @@ function Flow() {
   const saveBookmark = useStore((s) => s.saveBookmark)
   const pendingFocus = useStore((s) => s.pendingFocus)
   const consumePendingFocus = useStore((s) => s.consumePendingFocus)
+  const persistProjectFilePosition = useStore((s) => s.persistProjectFilePosition)
 
   const [search, setSearch] = useState('')
 
@@ -202,7 +203,40 @@ function Flow() {
     [moveNode],
   )
 
-  const onPaneClick = useCallback(() => clearProjectSelection(), [clearProjectSelection])
+  const onNodeDragStop = useCallback(
+    (event, node) => {
+      if (isProject && node.type === 'projectFile') {
+        persistProjectFilePosition(node.id, node.position)
+      }
+    },
+    [isProject, persistProjectFilePosition],
+  )
+
+  const onPaneClick = useCallback(() => {
+    clearFocus()
+    clearProjectSelection()
+    setMenu(null)
+  }, [clearFocus, clearProjectSelection])
+
+  /* ---------- context menu (creation — function mode only) */
+  const onPaneContextMenu = useCallback(
+    (e) => {
+      e.preventDefault()
+      if (isProject) return
+      const bounds = wrapperRef.current.getBoundingClientRect()
+      const flowPos = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      setMenu({ x: e.clientX - bounds.left, y: e.clientY - bounds.top, flowPos })
+    },
+    [rf, isProject],
+  )
+
+  const openMenuAtCenter = useCallback(() => {
+    const bounds = wrapperRef.current.getBoundingClientRect()
+    const cx = bounds.width - 240
+    const cy = bounds.height - 220
+    const flowPos = rf.screenToFlowPosition({ x: bounds.left + cx, y: bounds.top + cy })
+    setMenu({ x: cx, y: cy, flowPos })
+  }, [rf])
 
   /* ---------- top overlay actions ---------- */
   const handleSaveView = () => {
@@ -272,6 +306,7 @@ function Flow() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
+        onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
         minZoom={0.1}
         maxZoom={3}

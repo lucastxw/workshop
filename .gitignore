@@ -8,6 +8,7 @@ dist-ssr/
 # Vite / tooling cache
 .vite/
 *.local
+.env
 
 # Logs
 logs/
