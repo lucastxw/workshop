@@ -5,6 +5,16 @@ function rectsOverlap(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
 }
 
+function nearestSquareSide(count) {
+  if (count <= 1) return 1
+  const root = Math.sqrt(count)
+  const floorSide = Math.floor(root)
+  const ceilSide = Math.ceil(root)
+  const lowerDelta = count - floorSide * floorSide
+  const upperDelta = ceilSide * ceilSide - count
+  return lowerDelta <= upperDelta ? floorSide : ceilSide
+}
+
 function findAvailableProjectPosition(occupiedRects, startX = 920, startY = 120) {
   const GRID_W = 220
   const GRID_H = 120
@@ -24,6 +34,28 @@ function findAvailableProjectPosition(occupiedRects, startX = 920, startY = 120)
   }
 
   return { x: dedicatedStartX, y: startY }
+}
+
+function findAvailableProjectGridStart(occupiedRects, itemCount, startX = 920, startY = 120) {
+  const GRID_W = 220
+  const GRID_H = 120
+  const side = nearestSquareSide(itemCount)
+  const rows = Math.ceil(itemCount / side)
+  const width = side * GRID_W
+  const height = rows * GRID_H
+
+  const usedRight = occupiedRects.reduce((max, rect) => Math.max(max, rect.x + rect.w), 0)
+  const dedicatedStartX = Math.max(startX, usedRight + 260)
+
+  for (let row = 0; row < 12; row += 1) {
+    for (let col = 0; col < 8; col += 1) {
+      const candidate = { x: dedicatedStartX + col * GRID_W, y: startY + row * GRID_H, w: width, h: height }
+      const collides = occupiedRects.some((rect) => rectsOverlap(rect, candidate))
+      if (!collides) return { x: candidate.x, y: candidate.y, side }
+    }
+  }
+
+  return { x: dedicatedStartX, y: startY, side }
 }
 
 /* =============================================================================
@@ -169,10 +201,16 @@ export const useStore = create((set, get) => ({
         ...Object.values(state.subspaces).map((subspace) => ({ x: subspace.position.x, y: subspace.position.y, w: subspace.size.width, h: subspace.size.height })),
       ]
 
-      for (const file of newFiles) {
-        if (projectFiles[file.path]) continue
+      const filesToPlace = newFiles.filter((file) => !projectFiles[file.path])
+      const importGrid = findAvailableProjectGridStart(occupiedRects, filesToPlace.length)
+
+      for (const [index, file] of filesToPlace.entries()) {
         const folder = file.folder || dirname(file.path)
-        const position = file.position || findAvailableProjectPosition(occupiedRects)
+        const position =
+          file.position || {
+            x: importGrid.x + (index % importGrid.side) * 220,
+            y: importGrid.y + Math.floor(index / importGrid.side) * 120,
+          }
 
         projectFiles[file.path] = {
           id: file.path,
