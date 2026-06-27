@@ -69,13 +69,17 @@ function Flow() {
   // --- shared actions ---
   const moveNode = useStore((s) => s.moveNode)
   const requestFocus = useStore((s) => s.requestFocus)
+  const clearFocus = useStore((s) => s.clearFocus)
   const setFlowApi = useStore((s) => s.setFlowApi)
   const saveBookmark = useStore((s) => s.saveBookmark)
   const pendingFocus = useStore((s) => s.pendingFocus)
   const consumePendingFocus = useStore((s) => s.consumePendingFocus)
   const persistProjectFilePosition = useStore((s) => s.persistProjectFilePosition)
+  const viewMode = useStore((s) => s.viewMode)
+  const isProject = viewMode === 'project'
 
   const [search, setSearch] = useState('')
+  const [menu, setMenu] = useState(null)
 
   /* ---------- expose an imperative bridge for the sidebar (bookmarks) ---------- */
   useEffect(() => {

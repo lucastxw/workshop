@@ -206,50 +206,55 @@ export const useStore = create((set, get) => ({
       if (error) throw error
 
       if (data && data.length > 0) {
-        const projectFiles = {}
-        const projectFolders = {}
-        const projectEdges = []
-        const allPaths = new Set()
+        set((state) => {
+          const projectFiles = { ...state.projectFiles }
+          const projectFolders = { ...state.projectFolders }
+          const allPaths = new Set(Object.keys(projectFiles))
 
-        for (const file of data) {
-          projectFiles[file.path] = {
-            id: file.path,
-            path: file.path,
-            name: file.name,
-            folder: file.folder,
-            kind: file.kind,
-            url: file.url,
-            source: file.source,
-            position: file.position || { x: 0, y: 0 },
-          }
-          allPaths.add(file.path)
+          for (const file of data) {
+            const existing = projectFiles[file.path]
+            const folder = file.folder || existing?.folder || dirname(file.path)
+            const position = file.position ?? existing?.position ?? { x: 0, y: 0 }
 
-          if (!projectFolders[file.folder]) {
-            projectFolders[file.folder] = {
-              id: file.folder,
-              name: file.folder === '/' ? 'project root' : file.folder,
-              position: { x: Object.keys(projectFolders).length * 940, y: 0 },
-              size: { width: 380, height: 240 },
+            projectFiles[file.path] = {
+              id: file.path,
+              path: file.path,
+              name: file.name,
+              folder,
+              kind: file.kind,
+              url: file.url,
+              source: file.source,
+              position,
+            }
+            allPaths.add(file.path)
+
+            if (!projectFolders[folder]) {
+              projectFolders[folder] = {
+                id: folder,
+                name: folder === '/' ? 'project root' : folder,
+                position: { x: Object.keys(projectFolders).length * 940, y: 0 },
+                size: { width: 380, height: 240 },
+              }
             }
           }
-        }
 
-        // Re-evaluate edges
-        for (const path of Object.keys(projectFiles)) {
-          const file = projectFiles[path]
-          if (file.kind !== 'text') continue
-          const source = file.source
-          if (typeof source !== 'string') continue
-          for (const spec of parseImports(source)) {
-            const target = resolveImport(path, spec, allPaths)
-            if (!target || target === path) continue
-            if (!projectEdges.some((e) => e.source === path && e.target === target)) {
-              projectEdges.push({ source: path, target })
+          const projectEdges = []
+          for (const path of Object.keys(projectFiles)) {
+            const file = projectFiles[path]
+            if (file.kind !== 'text') continue
+            const source = file.source
+            if (typeof source !== 'string') continue
+            for (const spec of parseImports(source)) {
+              const target = resolveImport(path, spec, allPaths)
+              if (!target || target === path) continue
+              if (!projectEdges.some((e) => e.source === path && e.target === target)) {
+                projectEdges.push({ source: path, target })
+              }
             }
           }
-        }
 
-        set({ projectFiles, projectFolders, projectEdges })
+          return { projectFiles, projectFolders, projectEdges }
+        })
       }
     } catch (e) {
       console.error('Error fetching files from Supabase:', e)
