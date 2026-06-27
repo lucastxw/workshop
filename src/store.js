@@ -644,10 +644,26 @@ export const useStore = create((set, get) => ({
     }),
 
   /* ----- subspace controls ----- */
+  setSubspaceName: (id, name) =>
+    set((s) => ({ subspaces: { ...s.subspaces, [id]: { ...s.subspaces[id], name } } })),
   setSubspaceColor: (id, color) =>
     set((s) => ({ subspaces: { ...s.subspaces, [id]: { ...s.subspaces[id], color } } })),
   setSubspaceDescription: (id, description) =>
     set((s) => ({ subspaces: { ...s.subspaces, [id]: { ...s.subspaces[id], description } } })),
+  resizeSubspace: (id, size, position) =>
+    set((s) => {
+      if (!s.subspaces[id]) return {}
+      return {
+        subspaces: {
+          ...s.subspaces,
+          [id]: {
+            ...s.subspaces[id],
+            size: size ?? s.subspaces[id].size,
+            position: position ?? s.subspaces[id].position,
+          },
+        },
+      }
+    }),
 
   /* ----- bookmarks ----- */
   // Save current viewport (used by the top "Save view" button).
