@@ -1,9 +1,71 @@
 import { create } from 'zustand'
-import { buildProjectGraph, FILE_SOURCE, kindOf, dirname, parseImports, resolveImport } from './projectGraph'
+import { buildProjectGraph, FILE_SOURCE, kindOf, dirname, parseFunctions, parseImports, resolveImport } from './projectGraph'
 import { supabase } from './lib/supabase'
+
+function buildProjectEdges(projectFiles) {
+  const allPaths = new Set(Object.keys(projectFiles))
+  const projectEdges = []
+
+  for (const path of Object.keys(projectFiles)) {
+    const file = projectFiles[path]
+    if (file.kind !== 'text') continue
+    const source = file.source ?? FILE_SOURCE[path]
+    if (typeof source !== 'string') continue
+
+    for (const spec of parseImports(source)) {
+      const target = resolveImport(path, spec, allPaths)
+      if (!target || target === path) continue
+      if (!projectEdges.some((edge) => edge.source === path && edge.target === target)) {
+        projectEdges.push({ source: path, target })
+      }
+    }
+  }
+
+  return projectEdges
+}
+
+function createProjectFileRecord(file, position) {
+  return {
+    id: file.path,
+    path: file.path,
+    name: file.name,
+    folder: file.folder || dirname(file.path),
+    kind: file.kind,
+    position,
+    url: file.url || null,
+    source: file.source ?? null,
+  }
+}
 
 function rectsOverlap(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function parseTunableVariables(source, fileId) {
+  if (typeof source !== 'string') return []
+  const lines = source.split(/\r?\n/)
+  const functions = parseFunctions(source)
+  return lines.flatMap((line, index) => {
+    if (!line.includes('TUNABLE')) return []
+    const match = line.match(/([A-Za-z_$][\w$]*)\s*=\s*([^/\n]+?)(?:\s*\/\/.*)?$/)
+    if (!match) return []
+    const name = match[1]
+    const rawValue = match[2].trim()
+    const functionMatch = [...functions].reverse().find((fn) => fn.line <= index + 1)
+    return [{
+      id: `var-${Date.now()}-${index}`,
+      name,
+      value: rawValue,
+      line: index + 1,
+      originFunctionNodeId: functionMatch ? `pf::${fileId}::${functionMatch.name}::${functionMatch.line}` : null,
+      colorA: ['#38bdf8', '#f59e0b', '#34d399', '#f472b6'][index % 4],
+      colorB: ['#818cf8', '#fb923c', '#10b981', '#e879f9'][index % 4],
+    }]
+  })
 }
 
 function nearestSquareSide(count) {
@@ -159,6 +221,7 @@ export const useStore = create((set, get) => ({
   subspaces: initialSubspaces,
   tunables: initialTunables,
   bookmarks: initialBookmarks,
+  hiddenClusterIds: [],
 
   // --- Project Map (real directory) ---
   viewMode: 'project', // 'project' (real directory) | 'functions' (mock spatial demo)
@@ -322,177 +385,142 @@ export const useStore = create((set, get) => ({
   },
 
   addProjectFiles: async (newFiles) => {
+    const incomingFiles = Array.isArray(newFiles) ? newFiles : [newFiles]
+    const normalizedFiles = incomingFiles
+      .filter((file) => file?.path)
+      .map((file) => ({
+        ...file,
+        path: file.path || `/${file.name}`,
+        folder: file.folder || dirname(file.path || `/${file.name}`),
+        kind: file.kind || kindOf(file.name),
+      }))
+
+    if (normalizedFiles.length === 0) return
+
+    const state = get()
+    const projectFiles = { ...state.projectFiles }
+    const projectFolders = { ...state.projectFolders }
+    const occupiedRects = [
+      ...Object.values(projectFiles).map((file) => ({ x: file.position.x, y: file.position.y, w: 178, h: 64 })),
+      ...Object.values(projectFolders).map((folder) => ({ x: folder.position.x, y: folder.position.y, w: folder.size.width, h: folder.size.height })),
+      ...Object.values(state.subspaces).map((subspace) => ({ x: subspace.position.x, y: subspace.position.y, w: subspace.size.width, h: subspace.size.height })),
+    ]
+
+    const filesToPlace = normalizedFiles.filter((file) => !projectFiles[file.path])
+    if (filesToPlace.length === 0) return
+
+    const importGrid = findAvailableProjectGridStart(occupiedRects, filesToPlace.length)
+    const insertedRecords = []
+
+    for (const [index, file] of filesToPlace.entries()) {
+      const folder = file.folder || dirname(file.path)
+      const position =
+        file.position || {
+          x: importGrid.x + (index % importGrid.side) * 220,
+          y: importGrid.y + Math.floor(index / importGrid.side) * 120,
+        }
+
+      const record = createProjectFileRecord(file, position)
+      projectFiles[file.path] = record
+      insertedRecords.push({ file, record })
+
+      occupiedRects.push({ x: position.x, y: position.y, w: 178, h: 64 })
+
+      if (!projectFolders[folder]) {
+        projectFolders[folder] = {
+          id: folder,
+          name: folder === '/' ? 'project root' : folder,
+          position: { x: Object.keys(projectFolders).length * 940, y: 0 },
+          size: { width: 380, height: 240 },
+        }
+      }
+    }
+
+    set({
+      projectFiles,
+      projectFolders,
+      projectEdges: buildProjectEdges(projectFiles),
+    })
+
     if (!supabase) {
-      set((state) => {
-        const projectFiles = { ...state.projectFiles }
-        const projectFolders = { ...state.projectFolders }
-        const projectEdges = [...state.projectEdges]
-        const allPaths = new Set(Object.keys(projectFiles))
-        const occupiedRects = [
-          ...Object.values(projectFiles).map((file) => ({ x: file.position.x, y: file.position.y, w: 178, h: 64 })),
-          ...Object.values(projectFolders).map((folder) => ({ x: folder.position.x, y: folder.position.y, w: folder.size.width, h: folder.size.height })),
-          ...Object.values(state.subspaces).map((subspace) => ({ x: subspace.position.x, y: subspace.position.y, w: subspace.size.width, h: subspace.size.height })),
-        ]
-
-        const filesToPlace = newFiles.filter((file) => !projectFiles[file.path])
-        const importGrid = findAvailableProjectGridStart(occupiedRects, filesToPlace.length)
-
-        for (const [index, file] of filesToPlace.entries()) {
-          const folder = file.folder || dirname(file.path)
-          const position =
-            file.position || {
-              x: importGrid.x + (index % importGrid.side) * 220,
-              y: importGrid.y + Math.floor(index / importGrid.side) * 120,
-            }
-
-          projectFiles[file.path] = {
-            id: file.path,
-            path: file.path,
-            name: file.name,
-            folder,
-            kind: file.kind,
-            position,
-            url: file.url || null,
-            source: file.source || null,
-          }
-
-          allPaths.add(file.path)
-          occupiedRects.push({ x: position.x, y: position.y, w: 178, h: 64 })
-
-          if (!projectFolders[folder]) {
-            projectFolders[folder] = {
-              id: folder,
-              name: folder === '/' ? 'project root' : folder,
-              position: { x: Object.keys(projectFolders).length * 940, y: 0 },
-              size: { width: 380, height: 240 },
-            }
-          }
-        }
-
-        for (const path of Object.keys(projectFiles)) {
-          const file = projectFiles[path]
-          if (file.kind !== 'text') continue
-          const source = file.source ?? FILE_SOURCE[path]
-          if (typeof source !== 'string') continue
-          for (const spec of parseImports(source)) {
-            const target = resolveImport(path, spec, allPaths)
-            if (!target || target === path) continue
-            if (!projectEdges.some((e) => e.source === path && e.target === target)) {
-              projectEdges.push({ source: path, target })
-            }
-          }
-        }
-
-        return { projectFiles, projectFolders, projectEdges }
-      })
+      set({ supabaseError: null })
       return
     }
 
-    set({ supabaseLoading: true, supabaseError: null })
-    try {
-      const state = get()
-      const projectFiles = { ...state.projectFiles }
-      const projectFolders = { ...state.projectFolders }
-      const projectEdges = [...state.projectEdges]
-      const allPaths = new Set(Object.keys(projectFiles))
-      const occupiedRects = [
-        ...Object.values(projectFiles).map((file) => ({ x: file.position.x, y: file.position.y, w: 178, h: 64 })),
-        ...Object.values(projectFolders).map((folder) => ({ x: folder.position.x, y: folder.position.y, w: folder.size.width, h: folder.size.height })),
-        ...Object.values(state.subspaces).map((subspace) => ({ x: subspace.position.x, y: subspace.position.y, w: subspace.size.width, h: subspace.size.height })),
-      ]
+    set({ supabaseLoading: true })
 
-      const filesToPlace = newFiles.filter((file) => !projectFiles[file.path])
-      const importGrid = findAvailableProjectGridStart(occupiedRects, filesToPlace.length)
+    void (async () => {
+      const failures = []
 
-      const dbInserts = []
+      for (const { file, record } of insertedRecords) {
+        try {
+          let fileUrl = record.url
+          let source = record.source
 
-      for (const [index, file] of filesToPlace.entries()) {
-        const folder = file.folder || dirname(file.path)
-        const position =
-          file.position || {
-            x: importGrid.x + (index % importGrid.side) * 220,
-            y: importGrid.y + Math.floor(index / importGrid.side) * 120,
+          if (file.kind === 'text' && file.rawFile && source == null) {
+            source = await file.rawFile.text()
           }
 
-        let fileUrl = file.url || null
+          if ((file.kind === 'image' || file.kind === 'audio') && file.rawFile) {
+            const fileExt = file.name.split('.').pop() || 'bin'
+            const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`
+            const filePath = `${file.kind}s/${fileName}`
 
-        if ((file.kind === 'image' || file.kind === 'audio') && file.rawFile) {
-          const fileExt = file.name.split('.').pop()
-          const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`
-          const filePath = `${file.kind}s/${fileName}`
+            const { error: uploadError } = await supabase.storage
+              .from('files-bucket')
+              .upload(filePath, file.rawFile, {
+                cacheControl: '3600',
+                upsert: false,
+              })
 
-          const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('files-bucket')
-            .upload(filePath, file.rawFile, {
-              cacheControl: '3600',
-              upsert: false
-            })
+            if (uploadError) throw uploadError
 
-          if (uploadError) throw uploadError
-
-          const { data: { publicUrl } } = supabase.storage
-            .from('files-bucket')
-            .getPublicUrl(filePath)
-
-          fileUrl = publicUrl
-        }
-
-        const newFileRecord = {
-          id: file.path,
-          path: file.path,
-          name: file.name,
-          folder,
-          kind: file.kind,
-          url: fileUrl,
-          source: file.source || null,
-          position,
-        }
-
-        dbInserts.push(newFileRecord)
-
-        projectFiles[file.path] = newFileRecord
-        allPaths.add(file.path)
-        occupiedRects.push({ x: position.x, y: position.y, w: 178, h: 64 })
-
-        if (!projectFolders[folder]) {
-          projectFolders[folder] = {
-            id: folder,
-            name: folder === '/' ? 'project root' : folder,
-            position: { x: Object.keys(projectFolders).length * 940, y: 0 },
-            size: { width: 380, height: 240 },
+            const { data: { publicUrl } } = supabase.storage.from('files-bucket').getPublicUrl(filePath)
+            fileUrl = publicUrl
           }
+
+          const persistedRecord = {
+            ...record,
+            url: fileUrl,
+            source,
+          }
+
+          const { error: dbError } = await supabase
+            .from('project_files')
+            .upsert(persistedRecord, { onConflict: 'path' })
+
+          if (dbError) throw dbError
+
+          set((state) => {
+            const projectFiles = { ...state.projectFiles }
+            if (projectFiles[record.path]) {
+              projectFiles[record.path] = { ...projectFiles[record.path], ...persistedRecord }
+            }
+            return { projectFiles, projectEdges: buildProjectEdges(projectFiles) }
+          })
+        } catch (error) {
+          failures.push(error)
+          console.error('Error syncing imported file:', error)
+          set((state) => {
+            const projectFiles = { ...state.projectFiles }
+            if (projectFiles[record.path]) {
+              projectFiles[record.path] = {
+                ...projectFiles[record.path],
+                uploadError: error.message || 'Unable to sync file',
+              }
+            }
+            return { projectFiles }
+          })
         }
       }
 
-      if (dbInserts.length > 0) {
-        const { error: dbError } = await supabase
-          .from('project_files')
-          .upsert(dbInserts, { onConflict: 'path' })
-
-        if (dbError) throw dbError
+      if (failures.length > 0) {
+        set({ supabaseError: failures[0].message || 'Some files could not be synced' })
+      } else {
+        set({ supabaseError: null })
       }
-
-      for (const path of Object.keys(projectFiles)) {
-        const file = projectFiles[path]
-        if (file.kind !== 'text') continue
-        const source = file.source ?? FILE_SOURCE[path]
-        if (typeof source !== 'string') continue
-        for (const spec of parseImports(source)) {
-          const target = resolveImport(path, spec, allPaths)
-          if (!target || target === path) continue
-          if (!projectEdges.some((e) => e.source === path && e.target === target)) {
-            projectEdges.push({ source: path, target })
-          }
-        }
-      }
-
-      set({ projectFiles, projectFolders, projectEdges })
-    } catch (e) {
-      console.error('Error adding files to Supabase:', e)
-      set({ supabaseError: e.message })
-    } finally {
       set({ supabaseLoading: false })
-    }
+    })()
   },
 
   deleteProjectFile: async (id) => {
@@ -600,6 +628,7 @@ export const useStore = create((set, get) => ({
   focusedFileId: null, // file highlighted from the File Explorer
   expandedSubspaceId: null, // subspace requesting a full-map zoom
   terminalFileId: null, // file whose terminal modal is open
+  selectedTunableVariable: null, // { tunerId, variableId }
   searchQuery: '',
   pendingFocus: null, // { id } — a node the map should fitView onto, consumed by MapView
   flowApi: null, // imperative bridge { getViewport, setViewport, fitTo } set by MapView
@@ -616,6 +645,11 @@ export const useStore = create((set, get) => ({
 
   setExpandedSubspace: (id) => set({ expandedSubspaceId: id, pendingFocus: id ? { id } : get().pendingFocus }),
   clearExpandedSubspace: () => set({ expandedSubspaceId: null }),
+  setSelectedTunableVariable: (tunerId, variableId) => set({ selectedTunableVariable: tunerId && variableId ? { tunerId, variableId } : null }),
+  toggleClusterVisibility: (id) =>
+    set((s) => ({
+      hiddenClusterIds: s.hiddenClusterIds.includes(id) ? s.hiddenClusterIds.filter((entry) => entry !== id) : [...s.hiddenClusterIds, id],
+    })),
 
   openTerminal: (fileId) => set({ terminalFileId: fileId }),
   closeTerminal: () => set({ terminalFileId: null }),
@@ -644,10 +678,28 @@ export const useStore = create((set, get) => ({
     }),
 
   /* ----- subspace controls ----- */
+  setSubspaceName: (id, name) =>
+    set((s) => ({ subspaces: { ...s.subspaces, [id]: { ...s.subspaces[id], name } } })),
   setSubspaceColor: (id, color) =>
     set((s) => ({ subspaces: { ...s.subspaces, [id]: { ...s.subspaces[id], color } } })),
   setSubspaceDescription: (id, description) =>
     set((s) => ({ subspaces: { ...s.subspaces, [id]: { ...s.subspaces[id], description } } })),
+  setSubspaceTags: (id, tags) =>
+    set((s) => ({ subspaces: { ...s.subspaces, [id]: { ...s.subspaces[id], tags } } })),
+  resizeSubspace: (id, size, position) =>
+    set((s) => {
+      if (!s.subspaces[id]) return {}
+      return {
+        subspaces: {
+          ...s.subspaces,
+          [id]: {
+            ...s.subspaces[id],
+            size: size ?? s.subspaces[id].size,
+            position: position ?? s.subspaces[id].position,
+          },
+        },
+      }
+    }),
 
   /* ----- bookmarks ----- */
   // Save current viewport (used by the top "Save view" button).
@@ -675,8 +727,113 @@ export const useStore = create((set, get) => ({
       return {
         subspaces: {
           ...s.subspaces,
-          [id]: { id, name: 'New Subspace', position, size: { width: 360, height: 280 }, color: '#10b981', description: '' },
+          [id]: { id, name: 'New Subspace', position, size: { width: 360, height: 280 }, color: '#10b981', description: '', tags: [] },
         },
+      }
+    }),
+  createTunerFromFile: (fileId, position) =>
+    set((s) => {
+      const file = s.projectFiles[fileId] || s.files[fileId]
+      const source = getFileContent(s, fileId)
+      const id = `tuner-${Date.now()}`
+      const fallbackPosition = position || { x: 240, y: 220 }
+      return {
+        tunables: {
+          ...s.tunables,
+          [id]: {
+            id,
+            name: file?.name ? `Tuner · ${file.name}` : 'Tuner',
+            fileId,
+            position: fallbackPosition,
+            width: 260,
+            height: 160 + Math.max(0, parseTunableVariables(source, fileId).length) * 42,
+            variables: parseTunableVariables(source, fileId),
+          },
+        },
+        selectedTunableVariable: null,
+      }
+    }),
+  addTunerVariable: (tunerId, fileId, name = 'newVar', value = '0') =>
+    set((s) => {
+      const tuner = s.tunables[tunerId]
+      if (!tuner) return {}
+      const nextVariables = [
+        ...tuner.variables,
+        {
+          id: `var-${Date.now()}`,
+          name,
+          value,
+          line: null,
+          originFunctionNodeId: null,
+          colorA: '#38bdf8',
+          colorB: '#a78bfa',
+        },
+      ]
+      return {
+        tunables: {
+          ...s.tunables,
+          [tunerId]: { ...tuner, variables: nextVariables, height: 160 + nextVariables.length * 42 },
+        },
+      }
+    }),
+  removeTunerVariable: (tunerId, variableId) =>
+    set((s) => {
+      const tuner = s.tunables[tunerId]
+      if (!tuner) return {}
+      const nextVariables = tuner.variables.filter((variable) => variable.id !== variableId)
+      return {
+        tunables: {
+          ...s.tunables,
+          [tunerId]: { ...tuner, variables: nextVariables, height: 160 + nextVariables.length * 42 },
+        },
+      }
+    }),
+  updateTunerVariable: (tunerId, variableId, patch) =>
+    set((s) => {
+      const tuner = s.tunables[tunerId]
+      if (!tuner) return {}
+      const nextVariables = tuner.variables.map((variable) => (variable.id === variableId ? { ...variable, ...patch } : variable))
+      return {
+        tunables: {
+          ...s.tunables,
+          [tunerId]: { ...tuner, variables: nextVariables },
+        },
+      }
+    }),
+  updateTunerVariableValue: (tunerId, variableId, value) =>
+    set((s) => {
+      const tuner = s.tunables[tunerId]
+      if (!tuner) return {}
+      const variable = tuner.variables.find((entry) => entry.id === variableId)
+      if (!variable) return {}
+      const nextVariables = tuner.variables.map((entry) => (entry.id === variableId ? { ...entry, value } : entry))
+      const fileId = tuner.fileId
+      const content = getFileContent(s, fileId)
+      if (typeof content !== 'string' || !variable.line) {
+        return {
+          tunables: {
+            ...s.tunables,
+            [tunerId]: { ...tuner, variables: nextVariables },
+          },
+        }
+      }
+      const lines = content.split(/\r?\n/)
+      const lineIndex = variable.line - 1
+      const currentLine = lines[lineIndex] || ''
+      const updatedLine = currentLine.replace(/(\b(?:variable\.name|\w+)\b\s*=\s*)([^/\n]+?)(\s*(?:\/\/.*)?)$/, (full, prefix, _oldValue, suffix) => {
+        const matchedName = variable.name
+        if (new RegExp(`\\b${escapeRegExp(matchedName)}\\b`).test(currentLine)) {
+          return `${prefix}${value}${suffix}`
+        }
+        return full
+      })
+      lines[lineIndex] = updatedLine
+      return {
+        tunables: {
+          ...s.tunables,
+          [tunerId]: { ...tuner, variables: nextVariables },
+        },
+        fileEdits: { ...s.fileEdits, [fileId]: lines.join('\n') },
       }
     }),
   createFile: (position, folderPath) =>

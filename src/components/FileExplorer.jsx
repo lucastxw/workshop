@@ -60,24 +60,21 @@ export default function FileExplorer() {
     }
   }
 
-  const handleImport = async (event) => {
+  const handleImport = (event) => {
     const filesToImport = Array.from(event.target.files || [])
     if (filesToImport.length === 0) return
 
-    const imported = await Promise.all(
-      filesToImport.map(async (file) => {
-        const path = file.webkitRelativePath ? `/${file.webkitRelativePath}` : `/${file.name}`
-        const folder = path.slice(0, path.lastIndexOf('/')) || '/'
-        const kind = kindOf(file.name)
+    const imported = filesToImport.map((file) => {
+      const path = file.webkitRelativePath ? `/${file.webkitRelativePath}` : `/${file.name}`
+      const folder = path.slice(0, path.lastIndexOf('/')) || '/'
+      const kind = kindOf(file.name)
 
-        if (kind === 'image' || kind === 'audio') {
-          return { path, name: file.name, folder, kind, url: URL.createObjectURL(file), rawFile: file }
-        }
+      if (kind === 'image' || kind === 'audio') {
+        return { path, name: file.name, folder, kind, url: URL.createObjectURL(file), rawFile: file }
+      }
 
-        const source = await file.text()
-        return { path, name: file.name, folder, kind, source }
-      }),
-    )
+      return { path, name: file.name, folder, kind, rawFile: file }
+    })
 
     addProjectFiles(imported)
     event.target.value = ''
@@ -116,14 +113,12 @@ export default function FileExplorer() {
               onClick={() => fileInputRef.current?.click()}
               className="rounded-full border border-slate-700 bg-slate-800/90 px-3 py-1 text-[11px] font-medium text-slate-300 transition hover:border-slate-500 hover:text-slate-100"
             >
-              Import files
+              Import files/folders
             </button>
             <input
               ref={fileInputRef}
               type="file"
               multiple
-              webkitdirectory=""
-              directory=""
               className="hidden"
               onChange={handleImport}
             />

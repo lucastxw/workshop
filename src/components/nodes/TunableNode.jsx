@@ -1,17 +1,57 @@
 import { memo } from 'react'
+import { useStore } from '../../store'
 
 /* Tunable — a visual variant of the square/file object representing a tweakable
  * configuration value. */
-function TunableNode({ data }) {
+function TunableNode({ id, data }) {
+  const updateTunerVariableValue = useStore((s) => s.updateTunerVariableValue)
+  const removeTunerVariable = useStore((s) => s.removeTunerVariable)
+  const setSelectedTunableVariable = useStore((s) => s.setSelectedTunableVariable)
+  const selected = useStore((s) => s.selectedTunableVariable)
+
   return (
-    <div className="flex h-[88px] w-[150px] flex-col rounded-xl border border-cyan-500/50 bg-gradient-to-br from-cyan-900/40 to-slate-900/80 p-2.5 shadow-lg shadow-cyan-900/30">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-cyan-300/80">
-        <span>⚙</span>
-        <span>tunable</span>
+    <div className="flex min-h-[120px] w-[260px] flex-col rounded-2xl border border-cyan-500/50 bg-gradient-to-br from-cyan-900/35 to-slate-900/85 p-3 shadow-lg shadow-cyan-950/30">
+      <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-cyan-300/80">
+        <div className="flex items-center gap-1.5">
+          <span>⚙</span>
+          <span>tuner</span>
+        </div>
+        <div className="truncate font-mono text-[11px] text-slate-400">{data.fileId}</div>
       </div>
-      <div className="mt-1 truncate font-mono text-[12px] text-slate-100">{data.name}</div>
-      <div className="mt-auto rounded-md bg-slate-950/60 px-2 py-1 text-center font-mono text-[13px] font-semibold text-cyan-200">
-        {data.value}
+      <div className="mt-2 truncate font-semibold text-slate-100">{data.name}</div>
+      <div className="mt-3 space-y-2">
+        {data.variables?.map((variable) => {
+          const isSelected = selected?.tunerId === id && selected?.variableId === variable.id
+          return (
+            <div key={variable.id} className="rounded-xl border border-slate-700/80 bg-slate-950/60 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedTunableVariable(id, variable.id)}
+                  className={`flex-1 rounded-lg border px-2 py-1 text-left text-[12px] ${isSelected ? 'border-cyan-400 bg-cyan-950/70 text-cyan-100' : 'border-slate-700 bg-slate-900/70 text-slate-200'}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: variable.colorA }} />
+                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: variable.colorB }} />
+                    <span className="truncate font-mono">{variable.name}</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeTunerVariable(id, variable.id)}
+                  className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+                >
+                  ✕
+                </button>
+              </div>
+              <input
+                value={variable.value}
+                onChange={(event) => updateTunerVariableValue(id, variable.id, event.target.value)}
+                className="mt-2 w-full rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-[12px] text-slate-100 outline-none focus:border-cyan-500"
+              />
+            </div>
+          )
+        })}
       </div>
     </div>
   )

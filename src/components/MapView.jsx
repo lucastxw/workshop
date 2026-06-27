@@ -16,12 +16,16 @@ import { parseFunctions } from '../projectGraph'
 import ClusterNode from './nodes/ClusterNode'
 import ProjectFileNode from './nodes/ProjectFileNode'
 import ProjectFunctionNode from './nodes/ProjectFunctionNode'
+import SubspaceNode from './nodes/SubspaceNode'
+import TunableNode from './nodes/TunableNode'
 import AroundEdge from './edges/AroundEdge'
 
 const nodeTypes = {
   cluster: ClusterNode,
   projectFile: ProjectFileNode,
   projectFunction: ProjectFunctionNode,
+  subspace: SubspaceNode,
+  tunable: TunableNode,
 }
 
 const edgeTypes = { around: AroundEdge }
@@ -64,6 +68,12 @@ function Flow() {
   const selectedFileIds = useStore((s) => s.selectedFileIds)
   const projectFolderFilter = useStore((s) => s.projectFolderFilter)
   const fileEdits = useStore((s) => s.fileEdits)
+  const subspaces = useStore((s) => s.subspaces)
+  const tunables = useStore((s) => s.tunables)
+  const expandedSubspaceId = useStore((s) => s.expandedSubspaceId)
+  const hiddenClusterIds = useStore((s) => s.hiddenClusterIds)
+  const selectedTunableVariable = useStore((s) => s.selectedTunableVariable)
+  const setSelectedTunableVariable = useStore((s) => s.setSelectedTunableVariable)
   const selectProjectFile = useStore((s) => s.selectProjectFile)
   const clearProjectSelection = useStore((s) => s.clearProjectSelection)
 
@@ -73,6 +83,9 @@ function Flow() {
   const clearFocus = useStore((s) => s.clearFocus)
   const setFlowApi = useStore((s) => s.setFlowApi)
   const saveBookmark = useStore((s) => s.saveBookmark)
+  const createSubspace = useStore((s) => s.createSubspace)
+  const createTunerFromFile = useStore((s) => s.createTunerFromFile)
+  const clearExpandedSubspace = useStore((s) => s.clearExpandedSubspace)
   const pendingFocus = useStore((s) => s.pendingFocus)
   const consumePendingFocus = useStore((s) => s.consumePendingFocus)
   const persistProjectFilePosition = useStore((s) => s.persistProjectFilePosition)
@@ -115,12 +128,12 @@ function Flow() {
 
     // 1) folder clusters (background)
     for (const fld of Object.values(projectFolders)) {
-      if (!inFilter(fld.id)) continue
+      if (!inFilter(fld.id) || hiddenClusterIds.includes(fld.id)) continue
       out.push({
         id: `${fld.id}::cluster`,
         type: 'cluster',
         position: fld.position,
-        data: { name: fld.name, width: fld.size.width, height: fld.size.height },
+        data: { name: fld.name, width: fld.size.width, height: fld.size.height, folderId: fld.id, id: fld.id },
         style: { width: fld.size.width, height: fld.size.height, zIndex: 0 },
         zIndex: 0,
         selectable: false,
@@ -143,7 +156,37 @@ function Flow() {
       })
     }
 
-    // 3) functions of the single active text file → pills beside the file.
+    // 3) subspaces (purely visual grouping regions)
+    for (const subspace of Object.values(subspaces)) {
+      out.push({
+        id: subspace.id,
+        type: 'subspace',
+        position: subspace.position,
+        data: {
+          ...subspace,
+          width: subspace.size?.width ?? 360,
+          height: subspace.size?.height ?? 280,
+        },
+        style: { width: subspace.size?.width ?? 360, height: subspace.size?.height ?? 280, zIndex: 1 },
+        zIndex: 1,
+        selectable: true,
+      })
+    }
+
+    // 4) tuner objects
+    for (const tuner of Object.values(tunables)) {
+      out.push({
+        id: tuner.id,
+        type: 'tunable',
+        position: tuner.position,
+        data: { ...tuner },
+        style: { width: tuner.width ?? 260, height: tuner.height ?? 180, zIndex: 3 },
+        zIndex: 3,
+        selectable: true,
+      })
+    }
+
+    // 5) functions of the single active text file → pills beside the file.
     //    Top-level (not children) with a high z-index so they always render
     //    above neighbouring file nodes and stay clickable.
     const active = selectedProjectFileId && projectFiles[selectedProjectFileId]
@@ -166,7 +209,7 @@ function Flow() {
     }
 
     return out
-  }, [projectFiles, projectFolders, projectFolderFilter, selectedProjectFileId, selectedFileIds, fileEdits])
+  }, [projectFiles, projectFolders, projectFolderFilter, selectedProjectFileId, selectedFileIds, fileEdits, subspaces, tunables, hiddenClusterIds])
 
   const edges = useMemo(() => {
     const visibleIds = new Set(
@@ -197,8 +240,28 @@ function Flow() {
         }
       }
     }
+    if (selectedTunableVariable?.tunerId && selectedTunableVariable?.variableId) {
+      const tuner = tunables[selectedTunableVariable.tunerId]
+      const variable = tuner?.variables?.find((entry) => entry.id === selectedTunableVariable.variableId)
+      if (tuner && variable?.originFunctionNodeId) {
+        const key = `${tuner.id}-${variable.originFunctionNodeId}`
+        if (!edgeIds.has(key)) {
+          edgeIds.add(key)
+          E.push({
+            id: key,
+            source: tuner.id,
+            target: variable.originFunctionNodeId,
+            animated: true,
+            style: { stroke: '#f59e0b', strokeWidth: 2.25 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: '#f59e0b', width: 14, height: 14 },
+            className: 'focus-edge',
+          })
+        }
+      }
+    }
+
     return E
-  }, [selectedProjectFileId, selectedFileIds, projectEdges, projectFiles, projectFolderFilter])
+  }, [selectedProjectFileId, selectedFileIds, projectEdges, projectFiles, projectFolderFilter, selectedTunableVariable, tunables])
 
   /* ---------- node changes: apply selection AND drag-position to the store ---------- */
   const onNodesChange = useCallback(
@@ -233,8 +296,9 @@ function Flow() {
   const onPaneClick = useCallback(() => {
     clearFocus()
     clearProjectSelection()
+    setSelectedTunableVariable(null, null)
     setMenu(null)
-  }, [clearFocus, clearProjectSelection])
+  }, [clearFocus, clearProjectSelection, setSelectedTunableVariable])
 
   /* ---------- context menu (creation — function mode only) */
   const onPaneContextMenu = useCallback(
@@ -261,6 +325,22 @@ function Flow() {
     const name = window.prompt('Name this bookmark', `View ${Date.now() % 1000}`)
     if (name === null) return
     saveBookmark(rf.getViewport(), name)
+  }
+
+  const handleCreateSubspace = () => {
+    const bounds = wrapperRef.current?.getBoundingClientRect()
+    if (!bounds) return
+    const flowPos = rf.screenToFlowPosition({ x: bounds.width / 2, y: bounds.height / 2 })
+    createSubspace(flowPos)
+  }
+
+  const handleConnect = () => {
+    const selectedId = selectedProjectFileId || (selectedFileIds[0] ?? null)
+    if (!selectedId) return
+    const bounds = wrapperRef.current?.getBoundingClientRect()
+    if (!bounds) return
+    const flowPos = rf.screenToFlowPosition({ x: bounds.width / 2 + 140, y: bounds.height / 2 - 140 })
+    createTunerFromFile(selectedId, flowPos)
   }
 
   const searchResults = useMemo(() => {
@@ -309,6 +389,18 @@ function Flow() {
             )}
           </div>
           <button
+            onClick={handleCreateSubspace}
+            className="flex items-center gap-1.5 rounded-full border border-emerald-500/60 bg-emerald-600/90 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-emerald-500"
+          >
+            <span>⊞</span> Create subspace
+          </button>
+          <button
+            onClick={handleConnect}
+            className="flex items-center gap-1.5 rounded-full border border-cyan-500/60 bg-cyan-600/90 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-cyan-500"
+          >
+            <span>⤓</span> Connect
+          </button>
+          <button
             onClick={handleSaveView}
             className="flex items-center gap-1.5 rounded-full border border-indigo-500/60 bg-indigo-600/90 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-indigo-500"
           >
@@ -347,6 +439,31 @@ function Flow() {
           nodeColor={(n) => (n.type === 'cluster' ? '#dbc19e' : n.type === 'projectFunction' ? '#985634' : '#cdb891')}
         />
       </ReactFlow>
+
+      {expandedSubspaceId && subspaces[expandedSubspaceId] && (
+        <div className="pointer-events-auto absolute right-0 top-0 z-30 h-full w-[320px] border-l border-slate-700 bg-slate-950/95 p-4 shadow-2xl backdrop-blur transition-transform">
+          <div className="mb-4 flex items-start justify-between gap-2">
+            <div>
+              <div className="text-xs uppercase tracking-[0.3em] text-slate-500">Subspace</div>
+              <div className="text-lg font-semibold text-white">{subspaces[expandedSubspaceId].name}</div>
+            </div>
+            <button onClick={clearExpandedSubspace} className="rounded-full border border-slate-700 p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white">
+              ✕
+            </button>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Description</div>
+            <div className="text-sm leading-6 text-slate-300">{subspaces[expandedSubspaceId].description || 'Use the subspace toolbar to add context for this group.'}</div>
+          </div>
+          <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Colour</div>
+            <div className="flex items-center gap-2 text-sm text-slate-300">
+              <span className="h-3 w-3 rounded-full" style={{ background: subspaces[expandedSubspaceId].color }} />
+              {subspaces[expandedSubspaceId].color}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ---------- LEGEND ---------- */}
       <div className="pointer-events-none absolute bottom-6 left-6 z-20 rounded-xl border border-slate-700 bg-slate-900/90 px-3 py-2 text-[11px] shadow-lg backdrop-blur">
