@@ -59,3 +59,6 @@ export async function streamFileSummary({ apiKey, path, content, model = DEFAULT
     .map((b) => b.text)
     .join('')
 }
+
+const threshold = 4 //TUNABLE
+

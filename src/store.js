@@ -45,7 +45,7 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function parseTunableVariables(source, fileId) {
+export function parseTunableVariables(source, fileId) {
   if (typeof source !== 'string') return []
   const lines = source.split(/\r?\n/)
   const functions = parseFunctions(source)
@@ -200,6 +200,25 @@ const initialSubspaces = {
 
 const initialTunables = {
   'tune-cache': { id: 'tune-cache', name: 'CACHE_TTL', value: '300s', position: { x: 1060, y: 120 } },
+  'tune-threshold': {
+    id: 'tune-threshold',
+    name: 'Tuner · threshold',
+    fileId: '/src/main.jsx',
+    position: { x: 400, y: 260 },
+    width: 260,
+    height: 202,
+    variables: [
+      {
+        id: 'var-threshold',
+        name: 'threshold',
+        value: '4',
+        line: 12,
+        originFunctionNodeId: null,
+        colorA: '#38bdf8',
+        colorB: '#818cf8',
+      }
+    ]
+  }
 }
 
 const initialBookmarks = [
@@ -629,6 +648,7 @@ export const useStore = create((set, get) => ({
   expandedSubspaceId: null, // subspace requesting a full-map zoom
   terminalFileId: null, // file whose terminal modal is open
   selectedTunableVariable: null, // { tunerId, variableId }
+  isConnecting: false,
   searchQuery: '',
   pendingFocus: null, // { id } — a node the map should fitView onto, consumed by MapView
   flowApi: null, // imperative bridge { getViewport, setViewport, fitTo } set by MapView
@@ -646,6 +666,7 @@ export const useStore = create((set, get) => ({
   setExpandedSubspace: (id) => set({ expandedSubspaceId: id, pendingFocus: id ? { id } : get().pendingFocus }),
   clearExpandedSubspace: () => set({ expandedSubspaceId: null }),
   setSelectedTunableVariable: (tunerId, variableId) => set({ selectedTunableVariable: tunerId && variableId ? { tunerId, variableId } : null }),
+  setConnecting: (val) => set({ isConnecting: val }),
   toggleClusterVisibility: (id) =>
     set((s) => ({
       hiddenClusterIds: s.hiddenClusterIds.includes(id) ? s.hiddenClusterIds.filter((entry) => entry !== id) : [...s.hiddenClusterIds, id],
@@ -800,23 +821,44 @@ export const useStore = create((set, get) => ({
         },
       }
     }),
+  removeTuner: (id) =>
+    set((s) => {
+      const nextTunables = { ...s.tunables }
+      delete nextTunables[id]
+      const nextSelected = s.selectedTunableVariable?.tunerId === id ? null : s.selectedTunableVariable
+      return {
+        tunables: nextTunables,
+        selectedTunableVariable: nextSelected,
+      }
+    }),
   updateTunerVariableValue: (tunerId, variableId, value) =>
     set((s) => {
       const tuner = s.tunables[tunerId]
       if (!tuner) return {}
       const variable = tuner.variables.find((entry) => entry.id === variableId)
       if (!variable) return {}
-      const nextVariables = tuner.variables.map((entry) => (entry.id === variableId ? { ...entry, value } : entry))
+
+      // Update variables inside all tuner nodes displaying variables with this name
+      const nextTunables = { ...s.tunables }
+      for (const [tId, t] of Object.entries(nextTunables)) {
+        if (t.variables) {
+          nextTunables[tId] = {
+            ...t,
+            variables: t.variables.map((entry) => entry.name === variable.name ? { ...entry, value } : entry)
+          }
+        }
+      }
+
       const fileId = tuner.fileId
       const content = getFileContent(s, fileId)
       if (typeof content !== 'string' || !variable.line) {
         return {
-          tunables: {
-            ...s.tunables,
-            [tunerId]: { ...tuner, variables: nextVariables },
-          },
+          tunables: nextTunables,
         }
       }
+
+      // Update in-memory file content of the main tuner file
+      const nextFileEdits = { ...s.fileEdits }
       const lines = content.split(/\r?\n/)
       const lineIndex = variable.line - 1
       const currentLine = lines[lineIndex] || ''
@@ -828,12 +870,34 @@ export const useStore = create((set, get) => ({
         return full
       })
       lines[lineIndex] = updatedLine
+      nextFileEdits[fileId] = lines.join('\n')
+
+      // Sync other project files that define a tunable with the same name
+      for (const [otherFileId, otherFile] of Object.entries(s.projectFiles)) {
+        if (otherFileId === fileId) continue
+        const otherContent = getFileContent(s, otherFileId)
+        if (typeof otherContent !== 'string') continue
+        const otherVars = parseTunableVariables(otherContent, otherFileId)
+        const matchingVar = otherVars.find((v) => v.name === variable.name)
+        if (matchingVar && matchingVar.line) {
+          const otherLines = otherContent.split(/\r?\n/)
+          const oLineIndex = matchingVar.line - 1
+          const oLine = otherLines[oLineIndex] || ''
+          const updatedOLine = oLine.replace(/(\b(?:variable\.name|\w+)\b\s*=\s*)([^/\n]+?)(\s*(?:\/\/.*)?)$/, (full, prefix, _oldValue, suffix) => {
+            const matchedName = variable.name
+            if (new RegExp(`\\b${escapeRegExp(matchedName)}\\b`).test(oLine)) {
+              return `${prefix}${value}${suffix}`
+            }
+            return full
+          })
+          otherLines[oLineIndex] = updatedOLine
+          nextFileEdits[otherFileId] = otherLines.join('\n')
+        }
+      }
+
       return {
-        tunables: {
-          ...s.tunables,
-          [tunerId]: { ...tuner, variables: nextVariables },
-        },
-        fileEdits: { ...s.fileEdits, [fileId]: lines.join('\n') },
+        tunables: nextTunables,
+        fileEdits: nextFileEdits,
       }
     }),
   createFile: (position, folderPath) =>
@@ -930,3 +994,6 @@ export function getFileContent(state, path) {
   if (projectFile?.source) return projectFile.source
   return FILE_SOURCE[path] ?? ''
 }
+
+const threshold = 4 //TUNABLE
+
