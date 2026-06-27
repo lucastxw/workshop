@@ -1,5 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useStore } from '../store'
+import { kindOf } from '../projectGraph'
 
 /* File Explorer (top-left). Mode-aware:
  *   • Project mode  → lists the REAL directory; click selects + focuses the file
@@ -22,6 +23,12 @@ export default function FileExplorer() {
   const selectedProjectFileId = useStore((s) => s.selectedProjectFileId)
   const selectProjectFile = useStore((s) => s.selectProjectFile)
   const requestFocus = useStore((s) => s.requestFocus)
+  const projectFolderFilter = useStore((s) => s.projectFolderFilter)
+  const setProjectFolderFilter = useStore((s) => s.setProjectFolderFilter)
+  const clearProjectFolderFilter = useStore((s) => s.clearProjectFolderFilter)
+  const deleteProjectFile = useStore((s) => s.deleteProjectFile)
+  const addProjectFiles = useStore((s) => s.addProjectFiles)
+  const fileInputRef = useRef(null)
 
   const source = isProject ? projectFiles : files
 
@@ -29,11 +36,13 @@ export default function FileExplorer() {
     const g = {}
     for (const f of Object.values(source)) {
       const key = isProject ? f.folder : f.folderPath
+      if (isProject && projectFolderFilter && key !== projectFolderFilter) continue
       ;(g[key] ||= []).push(f)
     }
     return Object.entries(g).sort(([a], [b]) => a.localeCompare(b))
-  }, [source, isProject])
+  }, [source, isProject, projectFolderFilter])
 
+  const visibleCount = grouped.reduce((sum, [, list]) => sum + list.length, 0)
   const fnCount = (fileId) => Object.values(functions).filter((f) => f.fileId === fileId).length
 
   const onPick = (f) => {
@@ -45,16 +54,93 @@ export default function FileExplorer() {
     }
   }
 
+  const handleImport = async (event) => {
+    const filesToImport = Array.from(event.target.files || [])
+    if (filesToImport.length === 0) return
+
+    const imported = await Promise.all(
+      filesToImport.map(async (file) => {
+        const path = file.webkitRelativePath ? `/${file.webkitRelativePath}` : `/${file.name}`
+        const folder = path.slice(0, path.lastIndexOf('/')) || '/'
+        const kind = kindOf(file.name)
+
+        if (kind === 'image' || kind === 'audio') {
+          return { path, name: file.name, folder, kind, url: URL.createObjectURL(file) }
+        }
+
+        const source = await file.text()
+        return { path, name: file.name, folder, kind, source }
+      }),
+    )
+
+    addProjectFiles(imported)
+    event.target.value = ''
+  }
+
+  const clearFolderFilter = () => clearProjectFolderFilter()
+  const deleteFile = () => selectedProjectFileId && deleteProjectFile(selectedProjectFileId)
+
   return (
     <div className="flex h-full flex-col bg-panel">
-      <Header title="File Explorer" badge={Object.keys(source).length} />
+      <Header
+        title="File Explorer"
+        badge={visibleCount}
+        action={
+          <div className="flex items-center gap-2">
+            {projectFolderFilter ? (
+              <button
+                type="button"
+                onClick={clearFolderFilter}
+                className="rounded-full border border-rose-500 bg-rose-600/90 px-3 py-1 text-[11px] font-medium text-white transition hover:bg-rose-500"
+              >
+                Clear filter
+              </button>
+            ) : null}
+            {selectedProjectFileId ? (
+              <button
+                type="button"
+                onClick={deleteFile}
+                className="rounded-full border border-red-500 bg-red-600/90 px-3 py-1 text-[11px] font-medium text-white transition hover:bg-red-500"
+              >
+                Delete
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-full border border-slate-700 bg-slate-800/90 px-3 py-1 text-[11px] font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+            >
+              Import files
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              webkitdirectory=""
+              directory=""
+              className="hidden"
+              onChange={handleImport}
+            />
+          </div>
+        }
+      />
       <div className="thin-scroll flex-1 overflow-auto py-1">
         {grouped.map(([folder, list]) => (
           <div key={folder} className="mb-1">
-            <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] text-slate-500">
-              <span>▾</span>
-              <span className="truncate font-mono">{folder || '/'}</span>
-            </div>
+            <button
+              type="button"
+              onClick={() => setProjectFolderFilter(projectFolderFilter === folder ? null : folder)}
+              className={[
+                'flex w-full items-center justify-between gap-1.5 px-3 py-1 text-left text-[11px] transition',
+                projectFolderFilter === folder ? 'bg-slate-800 text-slate-100' : 'text-slate-500 hover:bg-slate-900/80',
+              ].join(' ')}
+            >
+              <span className="flex items-center gap-1.5">
+                <span>▾</span>
+                <span className="truncate font-mono">{folder || '/'}</span>
+              </span>
+              <span className="text-[10px] text-slate-400">{list.length} files</span>
+            </button>
             {list.map((f) => {
               const active = isProject ? selectedProjectFileId === f.id : focusedFileId === f.id
               return (

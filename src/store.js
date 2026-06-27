@@ -1,5 +1,30 @@
 import { create } from 'zustand'
-import { buildProjectGraph, FILE_SOURCE } from './projectGraph'
+import { buildProjectGraph, FILE_SOURCE, kindOf, dirname, parseImports, resolveImport } from './projectGraph'
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+function findAvailableProjectPosition(occupiedRects, startX = 920, startY = 120) {
+  const GRID_W = 220
+  const GRID_H = 120
+  const NODE_W = 178
+  const NODE_H = 64
+
+  const usedRight = occupiedRects.reduce((max, rect) => Math.max(max, rect.x + rect.w), 0)
+  const dedicatedStartX = Math.max(startX, usedRight + 260)
+
+  // Use a simple grid scan to find the first non-overlapping slot in an import cluster region.
+  for (let row = 0; row < 12; row += 1) {
+    for (let col = 0; col < 8; col += 1) {
+      const candidate = { x: dedicatedStartX + col * GRID_W, y: startY + row * GRID_H, w: NODE_W, h: NODE_H }
+      const collides = occupiedRects.some((rect) => rectsOverlap(rect, candidate))
+      if (!collides) return { x: candidate.x, y: candidate.y }
+    }
+  }
+
+  return { x: dedicatedStartX, y: startY }
+}
 
 /* =============================================================================
  *  GEOMETRY CONSTANTS
@@ -108,10 +133,91 @@ export const useStore = create((set, get) => ({
   projectFolders: projectGraph.folders,
   projectEdges: projectGraph.edges, // [{ source, target }] = source imports/affects target
   selectedProjectFileId: null,
+  projectFolderFilter: null,
 
   setViewMode: (mode) => set({ viewMode: mode, focusedNodeId: null, selectedProjectFileId: null }),
   selectProjectFile: (id) => set({ selectedProjectFileId: id }),
   clearProjectSelection: () => set({ selectedProjectFileId: null }),
+  setProjectFolderFilter: (folder) => set({ projectFolderFilter: folder }),
+  clearProjectFolderFilter: () => set({ projectFolderFilter: null }),
+
+  addProjectFiles: (newFiles) =>
+    set((state) => {
+      const projectFiles = { ...state.projectFiles }
+      const projectFolders = { ...state.projectFolders }
+      const projectEdges = [...state.projectEdges]
+      const allPaths = new Set(Object.keys(projectFiles))
+      const occupiedRects = [
+        ...Object.values(projectFiles).map((file) => ({ x: file.position.x, y: file.position.y, w: 178, h: 64 })),
+        ...Object.values(projectFolders).map((folder) => ({ x: folder.position.x, y: folder.position.y, w: folder.size.width, h: folder.size.height })),
+        ...Object.values(state.subspaces).map((subspace) => ({ x: subspace.position.x, y: subspace.position.y, w: subspace.size.width, h: subspace.size.height })),
+      ]
+
+      for (const file of newFiles) {
+        if (projectFiles[file.path]) continue
+        const folder = file.folder || dirname(file.path)
+        const position = file.position || findAvailableProjectPosition(occupiedRects)
+
+        projectFiles[file.path] = {
+          id: file.path,
+          path: file.path,
+          name: file.name,
+          folder,
+          kind: file.kind,
+          position,
+          url: file.url || null,
+          source: file.source || null,
+        }
+
+        allPaths.add(file.path)
+        occupiedRects.push({ x: position.x, y: position.y, w: 178, h: 64 })
+
+        if (!projectFolders[folder]) {
+          projectFolders[folder] = {
+            id: folder,
+            name: folder === '/' ? 'project root' : folder,
+            position: { x: Object.keys(projectFolders).length * 940, y: 0 },
+            size: { width: 380, height: 240 },
+          }
+        }
+      }
+
+      for (const path of Object.keys(projectFiles)) {
+        const file = projectFiles[path]
+        if (file.kind !== 'text') continue
+        const source = file.source ?? FILE_SOURCE[path]
+        if (typeof source !== 'string') continue
+        for (const spec of parseImports(source)) {
+          const target = resolveImport(path, spec, allPaths)
+          if (!target || target === path) continue
+          if (!projectEdges.some((e) => e.source === path && e.target === target)) {
+            projectEdges.push({ source: path, target })
+          }
+        }
+      }
+
+      return { projectFiles, projectFolders, projectEdges }
+    }),
+  deleteProjectFile: (id) =>
+    set((state) => {
+      const projectFiles = { ...state.projectFiles }
+      const projectFolders = { ...state.projectFolders }
+      const projectEdges = state.projectEdges.filter((e) => e.source !== id && e.target !== id)
+
+      delete projectFiles[id]
+      const folder = state.projectFiles[id]?.folder
+      if (folder) {
+        const stillInFolder = Object.values(projectFiles).some((file) => file.folder === folder)
+        if (!stillInFolder) delete projectFolders[folder]
+      }
+
+      return {
+        projectFiles,
+        projectFolders,
+        projectEdges,
+        selectedProjectFileId: state.selectedProjectFileId === id ? null : state.selectedProjectFileId,
+      }
+    }),
 
   // --- AI (Claude) file explanations ---
   apiKey: (typeof localStorage !== 'undefined' && localStorage.getItem('anthropic_api_key')) || '',
@@ -314,5 +420,7 @@ export function getProjectFocus(state) {
  * otherwise the original source pulled at build time. */
 export function getFileContent(state, path) {
   if (path in state.fileEdits) return state.fileEdits[path]
+  const projectFile = state.projectFiles?.[path]
+  if (projectFile?.source) return projectFile.source
   return FILE_SOURCE[path] ?? ''
 }
