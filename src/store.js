@@ -113,6 +113,20 @@ export const useStore = create((set, get) => ({
   selectProjectFile: (id) => set({ selectedProjectFileId: id }),
   clearProjectSelection: () => set({ selectedProjectFileId: null }),
 
+  // --- AI (Claude) file explanations ---
+  apiKey: (typeof localStorage !== 'undefined' && localStorage.getItem('anthropic_api_key')) || '',
+  aiModel: (typeof localStorage !== 'undefined' && localStorage.getItem('anthropic_model')) || 'claude-opus-4-8',
+  summaries: {}, // { [path]: markdownSummary } — cached per session
+  setApiKey: (key) => {
+    try { localStorage.setItem('anthropic_api_key', key) } catch {}
+    set({ apiKey: key })
+  },
+  setAiModel: (model) => {
+    try { localStorage.setItem('anthropic_model', model) } catch {}
+    set({ aiModel: model })
+  },
+  setSummary: (path, text) => set((s) => ({ summaries: { ...s.summaries, [path]: text } })),
+
   // --- floating text editor / asset viewer ---
   editorFileId: null, // project file currently open in the floating panel
   fileEdits: {}, // { [path]: editedContent } — in-memory edits (no backend)

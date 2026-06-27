@@ -73,6 +73,16 @@ Edges use a custom [`AroundEdge`](src/components/edges/AroundEdge.jsx) that bows
 
 Asset files are enumerated with a second `import.meta.glob(..., { query: '?url' })` so images/audio resolve to servable URLs; [`kindOf`](src/projectGraph.js) classifies each file by extension.
 
+## AI: explain a file with Claude
+
+Inside the editor, text files have an **✨ AI Explain** tab that asks Claude to summarise and explain the file's real source ([`AiSummary`](src/components/AiSummary.jsx) + [`lib/ai.js`](src/lib/ai.js)):
+
+- A single streaming call to the Anthropic Messages API via the official [`@anthropic-ai/sdk`](https://github.com/anthropics/anthropic-sdk-typescript) — the summary renders live as it arrives.
+- Default model **`claude-opus-4-8`** (switchable to Sonnet 4.6 / Haiku 4.5 in the panel), with **adaptive thinking** on the models that support it.
+- The structured prompt asks for **Purpose · Key parts · Dependencies & data flow · Notes**, rendered as lightweight Markdown. Results are cached per file for the session.
+
+> ⚠️ **No backend, so the key lives in the browser.** You paste an Anthropic API key into the panel; it's stored in `localStorage` and sent **directly** to Anthropic from the page (`dangerouslyAllowBrowser`). This is acceptable for local prototyping only — **in production, proxy these calls through a small server** that holds the key, and never ship the key to the client. The panel shows this warning before a key is entered.
+
 ## The core idea (Functions view): focus → ports
 
 The store holds a flat call list (`source → target`). When you single-click a function,
@@ -107,6 +117,7 @@ exercises every path at once.
 | Toggle **📁 Project Map / ◯ Functions** | Switches between the real directory graph and the mock demo       |
 | Click a file in **Project Map**       | Reveals dependency arrows (green = affects, amber = affected-by), dims the rest |
 | **Double-click** a file in Project Map | Opens the floating panel — code editor (text), image viewer, or audio player |
+| **✨ AI Explain** tab (text files)      | Streams a Claude-generated summary of the file (needs an Anthropic API key) |
 | Click a file in the Explorer          | Highlights and pans/zooms the map to it                            |
 | Single-click a function               | Focus: dimming, internal edges, dynamic ports                      |
 | Double-click a file (node or list)    | Opens the terminal editor modal (Esc to close)                     |
@@ -121,6 +132,7 @@ exercises every path at once.
 src/
 ├─ store.js                 # state + both graphs' logic (start here)
 ├─ projectGraph.js          # builds the REAL directory graph via import.meta.glob
+├─ lib/ai.js                # Claude streaming call (summarise + explain a file)
 ├─ App.jsx
 ├─ assets/                  # demo non-text nodes
 │  ├─ logo.svg              #   image viewer demo
@@ -131,7 +143,8 @@ src/
    ├─ BookmarkManager.jsx
    ├─ MapView.jsx           # both views: node/edge/port derivation, click logic, search, menu
    ├─ TerminalModal.jsx
-   ├─ FloatingEditor.jsx    # draggable text editor / image / audio panel
+   ├─ FloatingEditor.jsx    # draggable text editor / image / audio panel (+ AI tab)
+   ├─ AiSummary.jsx         # Claude "explain this file" panel
    ├─ edges/
    │  └─ AroundEdge.jsx     # curved edge that routes around nodes
    └─ nodes/
@@ -148,6 +161,7 @@ src/
 
 - **Project Map is build-time** — `import.meta.glob('?raw', { eager: true })` inlines every file's source into the bundle to parse imports client-side (no backend). Great for a prototype; for a large repo you'd move this to a small build script or dev-server endpoint. In `dev` it re-globs on add/remove of files via HMR.
 - **Import parsing is regex-based** — it catches `import … from '…'`, bare `import '…'`, dynamic `import('…')` and `require('…')`, resolving relative paths only. It does not follow path aliases or `package.json` exports.
+- **The AI key is client-side** — calling Claude from the browser with a user-pasted key (`dangerouslyAllowBrowser`) exposes that key on the page. This is a prototype affordance; production must route the call through a backend proxy. The Anthropic SDK also pulls in `node:fs`/`node:path` for its disk-based credential loader, which Vite stubs for the browser — harmless here because we always pass the key explicitly and never touch that path.
 - **No cross-file drag-reparenting** (Functions view) — functions are clamped to their parent file (`extent: 'parent'`). Files auto-grow to contain their functions, but a function can't yet be dragged from one file into another.
 - Node positions commit to the store on every drag frame (fine at this scale; would want a drag-end debounce for large graphs).
 - Creation flows use `window.prompt` to stay dependency-free — swap for a real modal in production.
