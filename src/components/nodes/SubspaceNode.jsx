@@ -1,8 +1,10 @@
 import { memo, useEffect, useState } from 'react'
+import { NodeToolbar, Position } from 'reactflow'
 import { useStore } from '../../store'
 
-// Warm "workshop" palette (terracotta · ochre · sage · forest green · rust · brown)
-const SWATCHES = ['#9a5634', '#bd8b3a', '#7e9a82', '#3c5a40', '#a54a31', '#62543d']
+// Warm pastel palette to match the cream/tan workshop theme
+// (clay · apricot · sage · moss · coral · ochre)
+const SWATCHES = ['#e08a5e', '#ecb55e', '#9bc285', '#7fae6b', '#e0826a', '#d3a85e']
 const MIN_W = 220
 const MIN_H = 180
 
@@ -146,8 +148,10 @@ function SubspaceNode({ id, data }) {
         </ToolBtn>
       </div>
 
-      {showConfig && (
-        <div className="absolute left-0 top-0 z-10 h-full w-[240px] rounded-[24px] border-r border-slate-700/70 bg-slate-950/95 p-3 shadow-2xl backdrop-blur nodrag">
+      {/* Rendered through a NodeToolbar so it portals ABOVE every other node —
+          otherwise file cards (higher z-index) cover this panel. */}
+      <NodeToolbar isVisible={showConfig} position={Position.Right} align="start" offset={12} className="nodrag">
+        <div className="max-h-[80vh] w-[240px] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-950/95 p-3 shadow-2xl backdrop-blur thin-scroll">
           <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">Subspace settings</div>
           <label className="mb-2 block text-[11px] font-medium text-slate-300">
             Title
@@ -201,10 +205,10 @@ function SubspaceNode({ id, data }) {
             )}
           </div>
         </div>
-      )}
+      </NodeToolbar>
 
-      {showColors && (
-        <div className="absolute right-2 top-10 z-20 flex flex-wrap gap-2 rounded-xl border border-slate-700 bg-slate-900/95 p-2 shadow-xl nodrag">
+      <NodeToolbar isVisible={showColors} position={Position.Right} align="start" offset={12} className="nodrag">
+        <div className="flex max-w-[180px] flex-wrap gap-2 rounded-xl border border-slate-700 bg-slate-900/95 p-2 shadow-xl">
           {SWATCHES.map((color) => (
             <button
               key={color}
@@ -218,7 +222,7 @@ function SubspaceNode({ id, data }) {
             />
           ))}
         </div>
-      )}
+      </NodeToolbar>
 
       <div className="absolute inset-0 rounded-[24px]" />
       <ResizeHandle position="nw" onPointerDown={(e) => beginResize('nw', e)} />

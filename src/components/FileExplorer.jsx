@@ -29,12 +29,19 @@ export default function FileExplorer() {
   const selectProjectFile = useStore((s) => s.selectProjectFile)
   const requestFocus = useStore((s) => s.requestFocus)
   const openEditor = useStore((s) => s.openEditor)
-  const projectFolderFilter = useStore((s) => s.projectFolderFilter)
-  const setProjectFolderFilter = useStore((s) => s.setProjectFolderFilter)
-  const clearProjectFolderFilter = useStore((s) => s.clearProjectFolderFilter)
   const deleteProjectFile = useStore((s) => s.deleteProjectFile)
   const addProjectFiles = useStore((s) => s.addProjectFiles)
   const fileInputRef = useRef(null)
+
+  // Which folders are collapsed in the tree (everything starts expanded).
+  const [collapsedFolders, setCollapsedFolders] = useState(() => new Set())
+  const toggleFolder = (folder) =>
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(folder)) next.delete(folder)
+      else next.add(folder)
+      return next
+    })
 
   const source = isProject ? projectFiles : files
 
@@ -42,11 +49,10 @@ export default function FileExplorer() {
     const g = {}
     for (const f of Object.values(source)) {
       const key = isProject ? f.folder : f.folderPath
-      if (isProject && projectFolderFilter && key !== projectFolderFilter) continue
       ;(g[key] ||= []).push(f)
     }
     return Object.entries(g).sort(([a], [b]) => a.localeCompare(b))
-  }, [source, isProject, projectFolderFilter])
+  }, [source, isProject])
 
   const visibleCount = grouped.reduce((sum, [, list]) => sum + list.length, 0)
   const fnCount = (fileId) => Object.values(functions).filter((f) => f.fileId === fileId).length
@@ -80,7 +86,6 @@ export default function FileExplorer() {
     event.target.value = ''
   }
 
-  const clearFolderFilter = () => clearProjectFolderFilter()
   const deleteFile = () => selectedProjectFileId && deleteProjectFile(selectedProjectFileId)
 
   return (
@@ -90,15 +95,6 @@ export default function FileExplorer() {
         badge={visibleCount}
         action={
           <div className="flex items-center gap-2">
-            {projectFolderFilter ? (
-              <button
-                type="button"
-                onClick={clearFolderFilter}
-                className="rounded-full border border-rose-500 bg-rose-600/90 px-3 py-1 text-[11px] font-medium text-white transition hover:bg-rose-500"
-              >
-                Clear filter
-              </button>
-            ) : null}
             {selectedProjectFileId ? (
               <button
                 type="button"
@@ -126,23 +122,23 @@ export default function FileExplorer() {
         }
       />
       <div className="thin-scroll flex-1 overflow-auto py-1">
-        {grouped.map(([folder, list]) => (
+        {grouped.map(([folder, list]) => {
+          const isCollapsed = collapsedFolders.has(folder)
+          return (
           <div key={folder} className="mb-1">
             <button
               type="button"
-              onClick={() => setProjectFolderFilter(projectFolderFilter === folder ? null : folder)}
-              className={[
-                'flex w-full items-center justify-between gap-1.5 px-3 py-1 text-left text-[11px] transition',
-                projectFolderFilter === folder ? 'bg-slate-800 text-slate-100' : 'text-slate-500 hover:bg-slate-900/80',
-              ].join(' ')}
+              onClick={() => toggleFolder(folder)}
+              title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
+              className="flex w-full items-center justify-between gap-1.5 px-3 py-1 text-left text-[11px] text-slate-500 transition hover:bg-slate-900/80 hover:text-slate-200"
             >
               <span className="flex items-center gap-1.5">
-                <span>▾</span>
+                <span className="inline-block w-2 text-[9px]">{isCollapsed ? '▸' : '▾'}</span>
                 <span className="truncate font-mono">{folder || '/'}</span>
               </span>
               <span className="text-[10px] text-slate-400">{list.length} files</span>
             </button>
-            {list.map((f) => {
+            {!isCollapsed && list.map((f) => {
               const active = isProject ? selectedProjectFileId === f.id : focusedFileId === f.id
               return (
                 <button
@@ -168,7 +164,8 @@ export default function FileExplorer() {
               )
             })}
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Supabase Guide Panel */}

@@ -7,16 +7,20 @@ import { useStore } from '../../store'
 function ProjectFunctionNode({ data }) {
   const openEditor = useStore((s) => s.openEditor)
   const scrollEditorToLine = useStore((s) => s.scrollEditorToLine)
+  // Only jump the IDE when it's already open — clicking a function should never
+  // pop the editor open by itself.
+  const editorOpen = useStore((s) => s.editorFileId !== null)
 
   return (
     <div
       onClick={(e) => {
         e.stopPropagation()
-        openEditor(data.fileId)
-        scrollEditorToLine(data.path, data.line, data.endLine)
+        if (!editorOpen) return
+        openEditor(data.fileId) // switch the open IDE to this function's file…
+        scrollEditorToLine(data.path, data.line, data.endLine) // …and scroll to it
       }}
-      title={`Go to line ${data.line}`}
-      className="nodrag flex cursor-pointer items-center gap-2 rounded-full border border-indigo-500/50 bg-slate-900/95 px-3 py-1 text-[11px] text-indigo-100 shadow-lg transition-colors hover:border-indigo-400 hover:bg-indigo-600/30"
+      title={editorOpen ? `Go to line ${data.line}` : `Open the file to jump to line ${data.line}`}
+      className="nodrag flex cursor-pointer items-center gap-2 rounded-full border border-indigo-500/50 bg-slate-900/95 px-3 py-1 text-[11px] text-slate-100 shadow-lg transition-colors hover:border-indigo-400 hover:bg-indigo-600/30"
       style={{ width: 184 }}
     >
       <span className="text-indigo-400">ƒ</span>

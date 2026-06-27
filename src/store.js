@@ -45,6 +45,43 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/* Reassign every variable named `name` to `value` inside one source string,
+ * language-agnostically. Handles the common assignment shapes across JS/TS,
+ * Python and C/C++:
+ *   • `name = 4`            (plain assignment — JS / Python)
+ *   • `int name = 4;`       (typed declaration — C/C++/Java)
+ *   • `const name = 4`      (qualified declaration — JS/TS)
+ *   • `name: int = 4`       (annotated — Python / TS)
+ *   • `#define NAME 4`      (C/C++ macro)
+ * Comparisons (`==`, `<=`, …) and compound assignment (`+=`) are left alone,
+ * as are object/dict keys (`name: 4`, which uses `:` not `=`).
+ * Returns the rewritten source and how many lines changed. */
+function setVariableEverywhere(source, name, value) {
+  if (typeof source !== 'string' || !name) return { content: source, count: 0 }
+  const id = escapeRegExp(name)
+  // #define NAME value   (value runs to end-of-line / trailing comment)
+  const defineRe = new RegExp(`^(\\s*#\\s*define\\s+${id}\\s+)(\\S[^\\n]*?)(\\s*(?://.*)?)$`)
+  // [type/qualifiers] NAME [: type] = value [; trailing-comment]
+  const assignRe = new RegExp(
+    `^(\\s*(?:[\\w:<>*&\\[\\]. ]*?\\b)?${id}(?:\\s*:[^=\\n]+?)?\\s*=)(?!=)(\\s*)([^;\\n]*?)(\\s*;?\\s*(?:(?://|#).*)?)$`,
+  )
+  let count = 0
+  const out = source.split(/\r?\n/).map((line) => {
+    let m = line.match(defineRe)
+    if (m) {
+      count += 1
+      return `${m[1]}${value}${m[3]}`
+    }
+    m = line.match(assignRe)
+    if (m) {
+      count += 1
+      return `${m[1]}${m[2]}${value}${m[4]}`
+    }
+    return line
+  })
+  return { content: out.join('\n'), count }
+}
+
 function parseTunableVariables(source, fileId) {
   if (typeof source !== 'string') return []
   const lines = source.split(/\r?\n/)
@@ -193,7 +230,7 @@ const initialSubspaces = {
     name: 'Core Domain',
     position: { x: 20, y: 20 },
     size: { width: 760, height: 760 },
-    color: '#6366f1',
+    color: '#e08a5e',
     description: 'Authentication, networking and persistence live here.',
   },
 }
@@ -710,14 +747,6 @@ export const useStore = create((set, get) => ({
         { id: `bm-${Date.now()}`, name: name || `View ${s.bookmarks.length + 1}`, viewport, focusObjectId: s.focusedNodeId, temporary: false },
       ],
     })),
-  // Double-click flow: snapshot the *current* view as a temp bookmark first.
-  pushTemporaryBookmark: (viewport) =>
-    set((s) => ({
-      bookmarks: [
-        ...s.bookmarks,
-        { id: `tmp-${Date.now()}`, name: `↩ Return point`, viewport, focusObjectId: s.focusedNodeId, temporary: true },
-      ],
-    })),
   removeBookmark: (id) => set((s) => ({ bookmarks: s.bookmarks.filter((b) => b.id !== id) })),
 
   /* ----- creation (context menu / FAB) ----- */
@@ -727,7 +756,7 @@ export const useStore = create((set, get) => ({
       return {
         subspaces: {
           ...s.subspaces,
-          [id]: { id, name: 'New Subspace', position, size: { width: 360, height: 280 }, color: '#10b981', description: '', tags: [] },
+          [id]: { id, name: 'New Subspace', position, size: { width: 360, height: 280 }, color: '#e08a5e', description: '', tags: [] },
         },
       }
     }),
@@ -836,6 +865,46 @@ export const useStore = create((set, get) => ({
         fileEdits: { ...s.fileEdits, [fileId]: lines.join('\n') },
       }
     }),
+  /* Search EVERY text file in the project and reassign each tuner variable to
+   * its value (across JS/TS/Python/C++/…), then persist the touched files.
+   * Returns a summary so the UI can report what changed. */
+  commitTuner: async (tunerId) => {
+    const state = get()
+    const tuner = state.tunables[tunerId]
+    if (!tuner) return { changedFiles: 0, changedCount: 0 }
+    const vars = (tuner.variables || []).filter((v) => v.name && v.value !== '' && v.value != null)
+    if (vars.length === 0) return { changedFiles: 0, changedCount: 0 }
+
+    const edits = {}
+    let changedCount = 0
+    for (const path of Object.keys(state.projectFiles)) {
+      const file = state.projectFiles[path]
+      if (file.kind !== 'text') continue
+      let content = getFileContent(state, path)
+      if (typeof content !== 'string') continue
+      let fileChanged = false
+      for (const variable of vars) {
+        const res = setVariableEverywhere(content, variable.name, String(variable.value))
+        if (res.count > 0) {
+          content = res.content
+          changedCount += res.count
+          fileChanged = true
+        }
+      }
+      if (fileChanged) edits[path] = content
+    }
+
+    const changedPaths = Object.keys(edits)
+    if (changedPaths.length === 0) return { changedFiles: 0, changedCount: 0 }
+
+    // Stage all edits at once, then flush each through the normal save path
+    // (in-memory locally, or Supabase when configured).
+    set((s) => ({ fileEdits: { ...s.fileEdits, ...edits } }))
+    for (const path of changedPaths) {
+      await get().saveProjectFile(path)
+    }
+    return { changedFiles: changedPaths.length, changedCount }
+  },
   createFile: (position, folderPath) =>
     set((s) => {
       const id = `file-${Date.now()}`

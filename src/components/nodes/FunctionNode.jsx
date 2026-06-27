@@ -23,7 +23,7 @@ function FunctionNode({ id, data }) {
       className={[
         'group relative flex items-center gap-2 rounded-full border px-3 text-[12px] font-mono select-none cursor-pointer transition-all duration-150',
         isFocused
-          ? 'border-indigo-400 bg-indigo-500/25 text-indigo-100 shadow-[0_0_0_1px_rgba(99,102,241,0.6),0_0_18px_rgba(99,102,241,0.45)]'
+          ? 'border-indigo-400 bg-indigo-500/25 text-slate-100 shadow-[0_0_0_1px_rgba(99,102,241,0.6),0_0_18px_rgba(99,102,241,0.45)]'
           : dimmed
           ? 'border-slate-700/60 bg-transparent text-slate-500'
           : 'border-slate-600 bg-slate-700/70 text-slate-100 hover:border-slate-400',
