@@ -10,16 +10,19 @@ function SubspaceNode({ id, data }) {
   const setSubspaceName = useStore((s) => s.setSubspaceName)
   const setSubspaceColor = useStore((s) => s.setSubspaceColor)
   const setSubspaceDescription = useStore((s) => s.setSubspaceDescription)
+  const setSubspaceTags = useStore((s) => s.setSubspaceTags)
   const resizeSubspace = useStore((s) => s.resizeSubspace)
 
   const [showConfig, setShowConfig] = useState(false)
   const [showColors, setShowColors] = useState(false)
   const [resizeMode, setResizeMode] = useState(null)
+  const [tagInput, setTagInput] = useState('')
 
   const width = data.width ?? data.size?.width ?? 360
   const height = data.height ?? data.size?.height ?? 280
   const startX = data.position?.x ?? 0
   const startY = data.position?.y ?? 0
+  const tags = Array.isArray(data.tags) ? data.tags : []
 
   useEffect(() => {
     if (!resizeMode) return undefined
@@ -98,6 +101,14 @@ function SubspaceNode({ id, data }) {
     })
   }
 
+  const addTag = () => {
+    const normalized = tagInput.trim()
+    if (!normalized) return
+    const nextTags = Array.from(new Set([...tags, normalized]))
+    setSubspaceTags(id, nextTags)
+    setTagInput('')
+  }
+
   return (
     <div
       className="relative box-border overflow-hidden rounded-[24px] border-2 border-dashed"
@@ -146,7 +157,7 @@ function SubspaceNode({ id, data }) {
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-indigo-500"
             />
           </label>
-          <label className="block text-[11px] font-medium text-slate-300">
+          <label className="mb-2 block text-[11px] font-medium text-slate-300">
             Description
             <textarea
               defaultValue={data.description}
@@ -155,6 +166,39 @@ function SubspaceNode({ id, data }) {
               className="mt-1 h-24 w-full resize-none rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-indigo-500"
             />
           </label>
+          <div className="text-[11px] font-medium text-slate-300">
+            Tags
+            <div className="mt-1 flex gap-1">
+              <input
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                placeholder="Add a tag"
+                className="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-indigo-500"
+              />
+              <button
+                type="button"
+                onClick={addTag}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-2 text-sm text-slate-200 hover:bg-slate-700"
+              >
+                +
+              </button>
+            </div>
+            {tags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {tags.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setSubspaceTags(id, tags.filter((entry) => entry !== tag))}
+                    className="rounded-full border border-slate-700 bg-slate-800/80 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-700"
+                  >
+                    #{tag} ×
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

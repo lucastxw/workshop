@@ -194,6 +194,7 @@ export const useStore = create((set, get) => ({
   subspaces: initialSubspaces,
   tunables: initialTunables,
   bookmarks: initialBookmarks,
+  hiddenClusterIds: [],
 
   // --- Project Map (real directory) ---
   viewMode: 'project', // 'project' (real directory) | 'functions' (mock spatial demo)
@@ -616,6 +617,10 @@ export const useStore = create((set, get) => ({
 
   setExpandedSubspace: (id) => set({ expandedSubspaceId: id, pendingFocus: id ? { id } : get().pendingFocus }),
   clearExpandedSubspace: () => set({ expandedSubspaceId: null }),
+  toggleClusterVisibility: (id) =>
+    set((s) => ({
+      hiddenClusterIds: s.hiddenClusterIds.includes(id) ? s.hiddenClusterIds.filter((entry) => entry !== id) : [...s.hiddenClusterIds, id],
+    })),
 
   openTerminal: (fileId) => set({ terminalFileId: fileId }),
   closeTerminal: () => set({ terminalFileId: null }),
@@ -650,6 +655,8 @@ export const useStore = create((set, get) => ({
     set((s) => ({ subspaces: { ...s.subspaces, [id]: { ...s.subspaces[id], color } } })),
   setSubspaceDescription: (id, description) =>
     set((s) => ({ subspaces: { ...s.subspaces, [id]: { ...s.subspaces[id], description } } })),
+  setSubspaceTags: (id, tags) =>
+    set((s) => ({ subspaces: { ...s.subspaces, [id]: { ...s.subspaces[id], tags } } })),
   resizeSubspace: (id, size, position) =>
     set((s) => {
       if (!s.subspaces[id]) return {}

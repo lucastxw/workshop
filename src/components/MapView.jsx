@@ -67,6 +67,7 @@ function Flow() {
   const fileEdits = useStore((s) => s.fileEdits)
   const subspaces = useStore((s) => s.subspaces)
   const expandedSubspaceId = useStore((s) => s.expandedSubspaceId)
+  const hiddenClusterIds = useStore((s) => s.hiddenClusterIds)
   const selectProjectFile = useStore((s) => s.selectProjectFile)
   const clearProjectSelection = useStore((s) => s.clearProjectSelection)
 
@@ -120,12 +121,12 @@ function Flow() {
 
     // 1) folder clusters (background)
     for (const fld of Object.values(projectFolders)) {
-      if (!inFilter(fld.id)) continue
+      if (!inFilter(fld.id) || hiddenClusterIds.includes(fld.id)) continue
       out.push({
         id: `${fld.id}::cluster`,
         type: 'cluster',
         position: fld.position,
-        data: { name: fld.name, width: fld.size.width, height: fld.size.height },
+        data: { name: fld.name, width: fld.size.width, height: fld.size.height, folderId: fld.id, id: fld.id },
         style: { width: fld.size.width, height: fld.size.height, zIndex: 0 },
         zIndex: 0,
         selectable: false,
@@ -188,7 +189,7 @@ function Flow() {
     }
 
     return out
-  }, [projectFiles, projectFolders, projectFolderFilter, selectedProjectFileId, selectedFileIds, fileEdits, subspaces])
+  }, [projectFiles, projectFolders, projectFolderFilter, selectedProjectFileId, selectedFileIds, fileEdits, subspaces, hiddenClusterIds])
 
   const edges = useMemo(() => {
     const visibleIds = new Set(
