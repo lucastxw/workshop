@@ -1,7 +1,8 @@
 import { memo, useState } from 'react'
 import { useStore } from '../../store'
 
-const SWATCHES = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#ef4444']
+// Warm "workshop" palette (terracotta · ochre · sage · forest green · rust · brown)
+const SWATCHES = ['#9a5634', '#bd8b3a', '#7e9a82', '#3c5a40', '#a54a31', '#62543d']
 
 /* Subspace — a translucent rectangle used to visually group objects. Has a
  * top-right toolbar: Description · Colour · Expand. */
@@ -58,7 +59,7 @@ function SubspaceNode({ id, data }) {
             <button
               key={c}
               onClick={() => { setSubspaceColor(id, c); setShowColors(false) }}
-              className="h-5 w-5 rounded-full ring-2 ring-transparent hover:ring-white/60"
+              className="h-5 w-5 rounded-full ring-2 ring-transparent hover:ring-slate-400"
               style={{ background: c }}
             />
           ))}
@@ -73,7 +74,7 @@ function ToolBtn({ children, label, onClick }) {
     <button
       title={label}
       onClick={(e) => { e.stopPropagation(); onClick() }}
-      className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-slate-900/80 text-[11px] text-slate-300 hover:bg-slate-800 hover:text-white"
+      className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-slate-900/80 text-[11px] text-slate-300 hover:bg-slate-800 hover:text-slate-100"
     >
       {children}
     </button>

@@ -218,17 +218,17 @@ export function buildProjectGraph() {
 }
 
 export const FILE_EXT_COLOR = {
-  jsx: '#38bdf8',
-  tsx: '#38bdf8',
-  js: '#eab308',
-  ts: '#eab308',
-  json: '#f59e0b',
-  css: '#ec4899',
-  md: '#94a3b8',
-  html: '#fb923c',
-  svg: '#a78bfa',
-  png: '#a78bfa',
-  jpg: '#a78bfa',
-  wav: '#22d3ee',
-  mp3: '#22d3ee',
+  jsx: '#3c5a40', // forest green
+  tsx: '#3c5a40',
+  js: '#a87a2f', // ochre
+  ts: '#a87a2f',
+  json: '#bd8b3a',
+  css: '#a54a31', // rust
+  md: '#92805f', // muted brown
+  html: '#a8663f', // terracotta
+  svg: '#7d4526', // brown
+  png: '#7d4526',
+  jpg: '#7d4526',
+  wav: '#4d6a52', // sage
+  mp3: '#4d6a52',
 }

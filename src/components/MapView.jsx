@@ -26,8 +26,8 @@ const nodeTypes = {
 
 const edgeTypes = { around: AroundEdge }
 
-const DOWNSTREAM_COLOR = '#34d399' // selection AFFECTS these (arrow exits selection's right)
-const UPSTREAM_COLOR = '#f59e0b' // these AFFECT the selection (arrow enters selection's left)
+const DOWNSTREAM_COLOR = '#3c5a40' // selection AFFECTS these — forest green (arrow exits right)
+const UPSTREAM_COLOR = '#a8663f' // these AFFECT the selection — terracotta (arrow enters left)
 
 const FILE_W = 178
 const FILE_H = 64
@@ -42,6 +42,7 @@ function makeEdge(source, target, color, opts = {}) {
     type: 'around', // route around node bodies (see AroundEdge)
     animated: true,
     className: 'focus-edge',
+    zIndex: 2000, // render arrows ON TOP of file nodes (z 2) and function pills (z 1000)
     style: { stroke: color, strokeWidth: 2 },
     markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
     data: { lane: opts.lane ?? 0, bow: opts.bow ?? 'down' },
@@ -336,14 +337,14 @@ function Flow() {
         panOnDrag={[1, 2]}
         multiSelectionKeyCode={['Meta', 'Control']}
       >
-        <Background variant={BackgroundVariant.Dots} gap={26} size={1.5} color="#1e2533" />
-        <Controls position="top-right" className="!bg-slate-900 !border-slate-700" showInteractive={false} />
+        <Background variant={BackgroundVariant.Dots} gap={26} size={1.5} color="#a99d7c" />
+        <Controls position="top-right" className="!bg-paper !border-slate-700 !text-slate-300" showInteractive={false} />
         <MiniMap
           pannable
           zoomable
-          maskColor="rgba(2,6,23,0.7)"
-          className="!bg-slate-900 !border !border-slate-700"
-          nodeColor={(n) => (n.type === 'cluster' ? '#1e293b' : n.type === 'projectFunction' ? '#6366f1' : '#475569')}
+          maskColor="rgba(120,108,80,0.25)"
+          className="!bg-panel !border !border-slate-700"
+          nodeColor={(n) => (n.type === 'cluster' ? '#dbc19e' : n.type === 'projectFunction' ? '#985634' : '#cdb891')}
         />
       </ReactFlow>
 

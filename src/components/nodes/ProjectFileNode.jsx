@@ -27,17 +27,19 @@ function ProjectFileNode({ id, data }) {
   }
 
   const ext = data.name.split('.').pop()
-  const dot = FILE_EXT_COLOR[ext] || '#64748b'
+  const dot = FILE_EXT_COLOR[ext] || '#92805f'
   const kindIcon = data.kind === 'image' ? '🖼' : data.kind === 'audio' ? '🔊' : null
 
+  // warm drop shadow so cards lift off the tan map instead of blending in
+  const lift = 'shadow-[0_4px_12px_rgba(70,52,30,0.32)]'
   const shell =
     relation === 'selected'
-      ? 'border-indigo-400 bg-indigo-500/20 shadow-[0_0_0_1px_rgba(99,102,241,0.7),0_0_20px_rgba(99,102,241,0.4)]'
+      ? 'border-indigo-500 bg-indigo-500/25 shadow-[0_0_0_1px_rgba(152,86,52,0.7),0_0_18px_rgba(152,86,52,0.45)]'
       : relation === 'downstream'
-      ? 'border-emerald-400/80 bg-slate-800/90'
+      ? `border-emerald-500 bg-ecru ${lift}`
       : relation === 'upstream'
-      ? 'border-amber-400/80 bg-slate-800/90'
-      : 'border-slate-700 bg-slate-800/80 hover:border-slate-500'
+      ? `border-amber-500 bg-ecru ${lift}`
+      : `border-slate-400 bg-ecru ${lift} hover:border-slate-300`
 
   return (
     <div

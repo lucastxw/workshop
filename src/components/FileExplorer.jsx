@@ -114,7 +114,7 @@ export default function FileExplorer() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="rounded-full border border-slate-700 bg-slate-800/90 px-3 py-1 text-[11px] font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+              className="rounded-full border border-slate-700 bg-slate-800/90 px-3 py-1 text-[11px] font-medium text-slate-300 transition hover:border-slate-500 hover:text-slate-100"
             >
               Import files
             </button>
@@ -160,13 +160,11 @@ export default function FileExplorer() {
                   className={[
                     'group flex w-full items-center gap-2 py-1 pl-7 pr-3 text-left text-[13px] transition-colors',
                     active
-                      ? isProject
-                        ? 'bg-indigo-500/15 text-indigo-200'
-                        : 'bg-amber-500/15 text-amber-200'
+                      ? 'bg-emerald-500 text-paper' // forest green = user selection
                       : 'text-slate-300 hover:bg-slate-800/60',
                   ].join(' ')}
                 >
-                  <span className={active ? (isProject ? 'text-indigo-400' : 'text-amber-400') : 'text-slate-500'}>▢</span>
+                  <span className={active ? 'text-paper' : 'text-slate-500'}>▢</span>
                   <span className="flex-1 truncate font-mono">{f.name}</span>
                   {!isProject && (
                     <span className="rounded bg-slate-800 px-1.5 text-[10px] text-slate-400 group-hover:bg-slate-700">{fnCount(f.id)}</span>
@@ -269,9 +267,9 @@ create policy "Allow public delete access" on public.project_files for delete us
 
 export function Header({ title, badge, action }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
+    <div className="flex items-center justify-between border-b border-slate-800 bg-[#c19d6b] px-3 py-2">
       <div className="flex items-center gap-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{title}</h2>
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-300">{title}</h2>
         {badge != null && <span className="rounded-full bg-slate-800 px-1.5 text-[10px] text-slate-400">{badge}</span>}
       </div>
       {action}

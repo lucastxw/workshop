@@ -109,7 +109,7 @@ export default function FloatingEditor() {
 
   return (
     <div
-      className="fixed z-50 flex w-[480px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-slate-700 bg-[#0b0e14] shadow-2xl"
+      className="fixed z-50 flex w-[480px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-slate-700 bg-paper shadow-2xl"
       style={{ left: pos.x, top: pos.y, height: file.kind === 'text' ? 460 : 'auto' }}
     >
       {/* title bar (drag handle) */}
@@ -120,7 +120,7 @@ export default function FloatingEditor() {
         <span className="ml-1 truncate font-mono text-xs text-slate-300">{file.path}</span>
         {edited && <span className="rounded bg-amber-500/20 px-1.5 text-[10px] text-amber-300">● edited</span>}
         <span className="ml-auto rounded bg-slate-800 px-1.5 text-[10px] uppercase text-slate-400">{file.kind}</span>
-        <button onClick={closeEditor} className="text-slate-500 hover:text-white">✕</button>
+        <button onClick={closeEditor} className="text-slate-500 hover:text-slate-100">✕</button>
       </div>
 
       {/* body */}
@@ -184,10 +184,10 @@ export default function FloatingEditor() {
                   spellCheck={false}
                   value={content}
                   onChange={(e) => setFileEdit(file.path, e.target.value)}
-                  className="thin-scroll min-h-0 flex-1 resize-none bg-[#0b0e14] p-3 font-mono text-[12.5px] leading-5 text-slate-200 outline-none"
+                  className="thin-scroll min-h-0 flex-1 resize-none bg-paper p-3 font-mono text-[12.5px] leading-5 text-slate-200 outline-none"
                 />
               ) : (
-                <div ref={scrollRef} className="thin-scroll min-h-0 flex-1 overflow-auto bg-[#0b0e14] py-2 font-mono text-[12.5px] leading-5">
+                <div ref={scrollRef} className="thin-scroll min-h-0 flex-1 overflow-auto bg-paper py-2 font-mono text-[12.5px] leading-5">
                   <div className="w-max min-w-full">
                     {lines.map((ln, i) => {
                       const n = i + 1
@@ -201,7 +201,7 @@ export default function FloatingEditor() {
                           <span
                             className={[
                               'sticky left-0 inline-block w-12 select-none px-2 text-right tabular-nums',
-                              hot ? 'bg-indigo-600/40 font-semibold text-indigo-200' : 'bg-[#0b0e14] text-slate-600',
+                              hot ? 'bg-indigo-600/40 font-semibold text-indigo-200' : 'bg-paper text-slate-600',
                             ].join(' ')}
                           >
                             {n}
@@ -221,7 +221,7 @@ export default function FloatingEditor() {
       )}
 
       {file.kind === 'image' && (
-        <div className="flex items-center justify-center bg-[repeating-conic-gradient(#1e2533_0%_25%,#11151f_0%_50%)] bg-[length:24px_24px] p-4">
+        <div className="flex items-center justify-center bg-[repeating-conic-gradient(#d8cdb0_0%_25%,#e9e1ca_0%_50%)] bg-[length:24px_24px] p-4">
           <img src={file.url} alt={file.name} className="max-h-[320px] max-w-full rounded-lg object-contain" />
         </div>
       )}

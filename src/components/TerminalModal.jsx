@@ -36,7 +36,7 @@ export default function TerminalModal() {
           <span className="ml-2 font-mono text-xs text-slate-300">
             {file.folderPath}/{file.name}
           </span>
-          <button onClick={closeTerminal} className="ml-auto text-slate-500 hover:text-white">✕</button>
+          <button onClick={closeTerminal} className="ml-auto text-slate-500 hover:text-slate-100">✕</button>
         </div>
 
         {/* editor body */}

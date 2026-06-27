@@ -5,7 +5,7 @@ import { memo } from 'react'
 function ClusterNode({ data }) {
   return (
     <div
-      className="h-full w-full rounded-2xl border border-dashed border-slate-700/70 bg-slate-800/15"
+      className="h-full w-full rounded-2xl border border-dashed border-slate-700/70 bg-subarea"
       style={{ width: data.width, height: data.height }}
     >
       <div className="px-3 py-1.5 text-[11px] font-mono tracking-tight text-slate-500">

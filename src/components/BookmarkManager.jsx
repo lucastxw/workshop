@@ -41,11 +41,11 @@ export default function BookmarkManager() {
             onDoubleClick={() => applyBookmark(bm)}
             className={[
               'group mx-2 mb-1.5 cursor-pointer rounded-lg border px-3 py-2 transition-colors',
-              bm.temporary ? 'border-dashed border-slate-700 bg-slate-800/30' : 'border-slate-700 bg-slate-800/60 hover:border-indigo-500/70',
+              bm.temporary ? 'border-dashed border-slate-700 bg-slate-800/30' : 'border-slate-700 bg-slate-800/60 hover:border-emerald-500/70 hover:bg-emerald-500/10',
             ].join(' ')}
           >
             <div className="flex items-center gap-2">
-              <span className={bm.temporary ? 'text-slate-500' : 'text-indigo-400'}>{bm.temporary ? '↩' : '★'}</span>
+              <span className={bm.temporary ? 'text-slate-500' : 'text-emerald-500'}>{bm.temporary ? '↩' : '★'}</span>
               <span className="flex-1 truncate text-[13px] text-slate-200">{bm.name}</span>
               <button
                 onClick={(e) => { e.stopPropagation(); removeBookmark(bm.id) }}

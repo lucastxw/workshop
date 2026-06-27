@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
@@ -11,15 +11,15 @@ body,
 #root {
   height: 100%;
   margin: 0;
-  background: #0b0e14;
-  color: #e5e7eb;
+  background: #dbc19c;
+  color: #554935;
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
 /* ---- React Flow theme overrides ---- */
 .react-flow {
-  background: #0b0e14;
+  background: #e2ceb3;
 }
 
 .react-flow__attribution {
@@ -30,7 +30,7 @@ body,
   width: 7px;
   height: 7px;
   border: none;
-  background: #475569;
+  background: #9a8a68;
 }
 
 /* We drive node selection styling from the store, so suppress React Flow's
@@ -51,13 +51,17 @@ body,
   }
 }
 
+::selection {
+  background: rgba(154, 86, 52, 0.28);
+}
+
 /* Thin scrollbars for panels */
 .thin-scroll::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 .thin-scroll::-webkit-scrollbar-thumb {
-  background: #2a3344;
+  background: #c0b291;
   border-radius: 9999px;
 }
 .thin-scroll::-webkit-scrollbar-track {
