@@ -17,6 +17,7 @@ import ClusterNode from './nodes/ClusterNode'
 import ProjectFileNode from './nodes/ProjectFileNode'
 import ProjectFunctionNode from './nodes/ProjectFunctionNode'
 import SubspaceNode from './nodes/SubspaceNode'
+import TunableNode from './nodes/TunableNode'
 import AroundEdge from './edges/AroundEdge'
 
 const nodeTypes = {
@@ -24,6 +25,7 @@ const nodeTypes = {
   projectFile: ProjectFileNode,
   projectFunction: ProjectFunctionNode,
   subspace: SubspaceNode,
+  tunable: TunableNode,
 }
 
 const edgeTypes = { around: AroundEdge }
@@ -66,8 +68,11 @@ function Flow() {
   const projectFolderFilter = useStore((s) => s.projectFolderFilter)
   const fileEdits = useStore((s) => s.fileEdits)
   const subspaces = useStore((s) => s.subspaces)
+  const tunables = useStore((s) => s.tunables)
   const expandedSubspaceId = useStore((s) => s.expandedSubspaceId)
   const hiddenClusterIds = useStore((s) => s.hiddenClusterIds)
+  const selectedTunableVariable = useStore((s) => s.selectedTunableVariable)
+  const setSelectedTunableVariable = useStore((s) => s.setSelectedTunableVariable)
   const selectProjectFile = useStore((s) => s.selectProjectFile)
   const clearProjectSelection = useStore((s) => s.clearProjectSelection)
 
@@ -78,6 +83,7 @@ function Flow() {
   const setFlowApi = useStore((s) => s.setFlowApi)
   const saveBookmark = useStore((s) => s.saveBookmark)
   const createSubspace = useStore((s) => s.createSubspace)
+  const createTunerFromFile = useStore((s) => s.createTunerFromFile)
   const clearExpandedSubspace = useStore((s) => s.clearExpandedSubspace)
   const pendingFocus = useStore((s) => s.pendingFocus)
   const consumePendingFocus = useStore((s) => s.consumePendingFocus)
@@ -166,7 +172,20 @@ function Flow() {
       })
     }
 
-    // 4) functions of the single active text file → pills beside the file.
+    // 4) tuner objects
+    for (const tuner of Object.values(tunables)) {
+      out.push({
+        id: tuner.id,
+        type: 'tunable',
+        position: tuner.position,
+        data: { ...tuner },
+        style: { width: tuner.width ?? 260, height: tuner.height ?? 180, zIndex: 3 },
+        zIndex: 3,
+        selectable: true,
+      })
+    }
+
+    // 5) functions of the single active text file → pills beside the file.
     //    Top-level (not children) with a high z-index so they always render
     //    above neighbouring file nodes and stay clickable.
     const active = selectedProjectFileId && projectFiles[selectedProjectFileId]
@@ -189,7 +208,7 @@ function Flow() {
     }
 
     return out
-  }, [projectFiles, projectFolders, projectFolderFilter, selectedProjectFileId, selectedFileIds, fileEdits, subspaces, hiddenClusterIds])
+  }, [projectFiles, projectFolders, projectFolderFilter, selectedProjectFileId, selectedFileIds, fileEdits, subspaces, tunables, hiddenClusterIds])
 
   const edges = useMemo(() => {
     const visibleIds = new Set(
@@ -220,8 +239,28 @@ function Flow() {
         }
       }
     }
+    if (selectedTunableVariable?.tunerId && selectedTunableVariable?.variableId) {
+      const tuner = tunables[selectedTunableVariable.tunerId]
+      const variable = tuner?.variables?.find((entry) => entry.id === selectedTunableVariable.variableId)
+      if (tuner && variable?.originFunctionNodeId) {
+        const key = `${tuner.id}-${variable.originFunctionNodeId}`
+        if (!edgeIds.has(key)) {
+          edgeIds.add(key)
+          E.push({
+            id: key,
+            source: tuner.id,
+            target: variable.originFunctionNodeId,
+            animated: true,
+            style: { stroke: '#f59e0b', strokeWidth: 2.25 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: '#f59e0b', width: 14, height: 14 },
+            className: 'focus-edge',
+          })
+        }
+      }
+    }
+
     return E
-  }, [selectedProjectFileId, selectedFileIds, projectEdges, projectFiles, projectFolderFilter])
+  }, [selectedProjectFileId, selectedFileIds, projectEdges, projectFiles, projectFolderFilter, selectedTunableVariable, tunables])
 
   /* ---------- node changes: apply selection AND drag-position to the store ---------- */
   const onNodesChange = useCallback(
@@ -256,8 +295,9 @@ function Flow() {
   const onPaneClick = useCallback(() => {
     clearFocus()
     clearProjectSelection()
+    setSelectedTunableVariable(null, null)
     setMenu(null)
-  }, [clearFocus, clearProjectSelection])
+  }, [clearFocus, clearProjectSelection, setSelectedTunableVariable])
 
   /* ---------- context menu (creation — function mode only) */
   const onPaneContextMenu = useCallback(
@@ -291,6 +331,15 @@ function Flow() {
     if (!bounds) return
     const flowPos = rf.screenToFlowPosition({ x: bounds.width / 2, y: bounds.height / 2 })
     createSubspace(flowPos)
+  }
+
+  const handleConnect = () => {
+    const selectedId = selectedProjectFileId || (selectedFileIds[0] ?? null)
+    if (!selectedId) return
+    const bounds = wrapperRef.current?.getBoundingClientRect()
+    if (!bounds) return
+    const flowPos = rf.screenToFlowPosition({ x: bounds.width / 2 + 140, y: bounds.height / 2 - 140 })
+    createTunerFromFile(selectedId, flowPos)
   }
 
   const searchResults = useMemo(() => {
@@ -343,6 +392,12 @@ function Flow() {
             className="flex items-center gap-1.5 rounded-full border border-emerald-500/60 bg-emerald-600/90 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-emerald-500"
           >
             <span>⊞</span> Create subspace
+          </button>
+          <button
+            onClick={handleConnect}
+            className="flex items-center gap-1.5 rounded-full border border-cyan-500/60 bg-cyan-600/90 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-cyan-500"
+          >
+            <span>⤓</span> Connect
           </button>
           <button
             onClick={handleSaveView}

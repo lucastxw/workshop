@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { buildProjectGraph, FILE_SOURCE, kindOf, dirname, parseImports, resolveImport } from './projectGraph'
+import { buildProjectGraph, FILE_SOURCE, kindOf, dirname, parseFunctions, parseImports, resolveImport } from './projectGraph'
 import { supabase } from './lib/supabase'
 
 function buildProjectEdges(projectFiles) {
@@ -39,6 +39,33 @@ function createProjectFileRecord(file, position) {
 
 function rectsOverlap(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function parseTunableVariables(source, fileId) {
+  if (typeof source !== 'string') return []
+  const lines = source.split(/\r?\n/)
+  const functions = parseFunctions(source)
+  return lines.flatMap((line, index) => {
+    if (!line.includes('TUNABLE')) return []
+    const match = line.match(/([A-Za-z_$][\w$]*)\s*=\s*([^/\n]+?)(?:\s*\/\/.*)?$/)
+    if (!match) return []
+    const name = match[1]
+    const rawValue = match[2].trim()
+    const functionMatch = [...functions].reverse().find((fn) => fn.line <= index + 1)
+    return [{
+      id: `var-${Date.now()}-${index}`,
+      name,
+      value: rawValue,
+      line: index + 1,
+      originFunctionNodeId: functionMatch ? `pf::${fileId}::${functionMatch.name}::${functionMatch.line}` : null,
+      colorA: ['#38bdf8', '#f59e0b', '#34d399', '#f472b6'][index % 4],
+      colorB: ['#818cf8', '#fb923c', '#10b981', '#e879f9'][index % 4],
+    }]
+  })
 }
 
 function nearestSquareSide(count) {
@@ -601,6 +628,7 @@ export const useStore = create((set, get) => ({
   focusedFileId: null, // file highlighted from the File Explorer
   expandedSubspaceId: null, // subspace requesting a full-map zoom
   terminalFileId: null, // file whose terminal modal is open
+  selectedTunableVariable: null, // { tunerId, variableId }
   searchQuery: '',
   pendingFocus: null, // { id } — a node the map should fitView onto, consumed by MapView
   flowApi: null, // imperative bridge { getViewport, setViewport, fitTo } set by MapView
@@ -617,6 +645,7 @@ export const useStore = create((set, get) => ({
 
   setExpandedSubspace: (id) => set({ expandedSubspaceId: id, pendingFocus: id ? { id } : get().pendingFocus }),
   clearExpandedSubspace: () => set({ expandedSubspaceId: null }),
+  setSelectedTunableVariable: (tunerId, variableId) => set({ selectedTunableVariable: tunerId && variableId ? { tunerId, variableId } : null }),
   toggleClusterVisibility: (id) =>
     set((s) => ({
       hiddenClusterIds: s.hiddenClusterIds.includes(id) ? s.hiddenClusterIds.filter((entry) => entry !== id) : [...s.hiddenClusterIds, id],
@@ -698,8 +727,113 @@ export const useStore = create((set, get) => ({
       return {
         subspaces: {
           ...s.subspaces,
-          [id]: { id, name: 'New Subspace', position, size: { width: 360, height: 280 }, color: '#10b981', description: '' },
+          [id]: { id, name: 'New Subspace', position, size: { width: 360, height: 280 }, color: '#10b981', description: '', tags: [] },
         },
+      }
+    }),
+  createTunerFromFile: (fileId, position) =>
+    set((s) => {
+      const file = s.projectFiles[fileId] || s.files[fileId]
+      const source = getFileContent(s, fileId)
+      const id = `tuner-${Date.now()}`
+      const fallbackPosition = position || { x: 240, y: 220 }
+      return {
+        tunables: {
+          ...s.tunables,
+          [id]: {
+            id,
+            name: file?.name ? `Tuner · ${file.name}` : 'Tuner',
+            fileId,
+            position: fallbackPosition,
+            width: 260,
+            height: 160 + Math.max(0, parseTunableVariables(source, fileId).length) * 42,
+            variables: parseTunableVariables(source, fileId),
+          },
+        },
+        selectedTunableVariable: null,
+      }
+    }),
+  addTunerVariable: (tunerId, fileId, name = 'newVar', value = '0') =>
+    set((s) => {
+      const tuner = s.tunables[tunerId]
+      if (!tuner) return {}
+      const nextVariables = [
+        ...tuner.variables,
+        {
+          id: `var-${Date.now()}`,
+          name,
+          value,
+          line: null,
+          originFunctionNodeId: null,
+          colorA: '#38bdf8',
+          colorB: '#a78bfa',
+        },
+      ]
+      return {
+        tunables: {
+          ...s.tunables,
+          [tunerId]: { ...tuner, variables: nextVariables, height: 160 + nextVariables.length * 42 },
+        },
+      }
+    }),
+  removeTunerVariable: (tunerId, variableId) =>
+    set((s) => {
+      const tuner = s.tunables[tunerId]
+      if (!tuner) return {}
+      const nextVariables = tuner.variables.filter((variable) => variable.id !== variableId)
+      return {
+        tunables: {
+          ...s.tunables,
+          [tunerId]: { ...tuner, variables: nextVariables, height: 160 + nextVariables.length * 42 },
+        },
+      }
+    }),
+  updateTunerVariable: (tunerId, variableId, patch) =>
+    set((s) => {
+      const tuner = s.tunables[tunerId]
+      if (!tuner) return {}
+      const nextVariables = tuner.variables.map((variable) => (variable.id === variableId ? { ...variable, ...patch } : variable))
+      return {
+        tunables: {
+          ...s.tunables,
+          [tunerId]: { ...tuner, variables: nextVariables },
+        },
+      }
+    }),
+  updateTunerVariableValue: (tunerId, variableId, value) =>
+    set((s) => {
+      const tuner = s.tunables[tunerId]
+      if (!tuner) return {}
+      const variable = tuner.variables.find((entry) => entry.id === variableId)
+      if (!variable) return {}
+      const nextVariables = tuner.variables.map((entry) => (entry.id === variableId ? { ...entry, value } : entry))
+      const fileId = tuner.fileId
+      const content = getFileContent(s, fileId)
+      if (typeof content !== 'string' || !variable.line) {
+        return {
+          tunables: {
+            ...s.tunables,
+            [tunerId]: { ...tuner, variables: nextVariables },
+          },
+        }
+      }
+      const lines = content.split(/\r?\n/)
+      const lineIndex = variable.line - 1
+      const currentLine = lines[lineIndex] || ''
+      const updatedLine = currentLine.replace(/(\b(?:variable\.name|\w+)\b\s*=\s*)([^/\n]+?)(\s*(?:\/\/.*)?)$/, (full, prefix, _oldValue, suffix) => {
+        const matchedName = variable.name
+        if (new RegExp(`\\b${escapeRegExp(matchedName)}\\b`).test(currentLine)) {
+          return `${prefix}${value}${suffix}`
+        }
+        return full
+      })
+      lines[lineIndex] = updatedLine
+      return {
+        tunables: {
+          ...s.tunables,
+          [tunerId]: { ...tuner, variables: nextVariables },
+        },
+        fileEdits: { ...s.fileEdits, [fileId]: lines.join('\n') },
       }
     }),
   createFile: (position, folderPath) =>
