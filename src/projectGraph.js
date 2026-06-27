@@ -232,3 +232,6 @@ export const FILE_EXT_COLOR = {
   wav: '#4d6a52', // sage
   mp3: '#4d6a52',
 }
+
+const threshold = 4 //TUNABLE
+

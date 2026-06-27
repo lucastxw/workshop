@@ -45,44 +45,7 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/* Reassign every variable named `name` to `value` inside one source string,
- * language-agnostically. Handles the common assignment shapes across JS/TS,
- * Python and C/C++:
- *   • `name = 4`            (plain assignment — JS / Python)
- *   • `int name = 4;`       (typed declaration — C/C++/Java)
- *   • `const name = 4`      (qualified declaration — JS/TS)
- *   • `name: int = 4`       (annotated — Python / TS)
- *   • `#define NAME 4`      (C/C++ macro)
- * Comparisons (`==`, `<=`, …) and compound assignment (`+=`) are left alone,
- * as are object/dict keys (`name: 4`, which uses `:` not `=`).
- * Returns the rewritten source and how many lines changed. */
-function setVariableEverywhere(source, name, value) {
-  if (typeof source !== 'string' || !name) return { content: source, count: 0 }
-  const id = escapeRegExp(name)
-  // #define NAME value   (value runs to end-of-line / trailing comment)
-  const defineRe = new RegExp(`^(\\s*#\\s*define\\s+${id}\\s+)(\\S[^\\n]*?)(\\s*(?://.*)?)$`)
-  // [type/qualifiers] NAME [: type] = value [; trailing-comment]
-  const assignRe = new RegExp(
-    `^(\\s*(?:[\\w:<>*&\\[\\]. ]*?\\b)?${id}(?:\\s*:[^=\\n]+?)?\\s*=)(?!=)(\\s*)([^;\\n]*?)(\\s*;?\\s*(?:(?://|#).*)?)$`,
-  )
-  let count = 0
-  const out = source.split(/\r?\n/).map((line) => {
-    let m = line.match(defineRe)
-    if (m) {
-      count += 1
-      return `${m[1]}${value}${m[3]}`
-    }
-    m = line.match(assignRe)
-    if (m) {
-      count += 1
-      return `${m[1]}${m[2]}${value}${m[4]}`
-    }
-    return line
-  })
-  return { content: out.join('\n'), count }
-}
-
-function parseTunableVariables(source, fileId) {
+export function parseTunableVariables(source, fileId) {
   if (typeof source !== 'string') return []
   const lines = source.split(/\r?\n/)
   const functions = parseFunctions(source)
@@ -230,13 +193,32 @@ const initialSubspaces = {
     name: 'Core Domain',
     position: { x: 20, y: 20 },
     size: { width: 760, height: 760 },
-    color: '#e08a5e',
+    color: '#6366f1',
     description: 'Authentication, networking and persistence live here.',
   },
 }
 
 const initialTunables = {
   'tune-cache': { id: 'tune-cache', name: 'CACHE_TTL', value: '300s', position: { x: 1060, y: 120 } },
+  'tune-threshold': {
+    id: 'tune-threshold',
+    name: 'Tuner · threshold',
+    fileId: '/src/main.jsx',
+    position: { x: 400, y: 260 },
+    width: 260,
+    height: 202,
+    variables: [
+      {
+        id: 'var-threshold',
+        name: 'threshold',
+        value: '4',
+        line: 12,
+        originFunctionNodeId: null,
+        colorA: '#38bdf8',
+        colorB: '#818cf8',
+      }
+    ]
+  }
 }
 
 const initialBookmarks = [
@@ -666,6 +648,7 @@ export const useStore = create((set, get) => ({
   expandedSubspaceId: null, // subspace requesting a full-map zoom
   terminalFileId: null, // file whose terminal modal is open
   selectedTunableVariable: null, // { tunerId, variableId }
+  isConnecting: false,
   searchQuery: '',
   pendingFocus: null, // { id } — a node the map should fitView onto, consumed by MapView
   flowApi: null, // imperative bridge { getViewport, setViewport, fitTo } set by MapView
@@ -683,6 +666,7 @@ export const useStore = create((set, get) => ({
   setExpandedSubspace: (id) => set({ expandedSubspaceId: id, pendingFocus: id ? { id } : get().pendingFocus }),
   clearExpandedSubspace: () => set({ expandedSubspaceId: null }),
   setSelectedTunableVariable: (tunerId, variableId) => set({ selectedTunableVariable: tunerId && variableId ? { tunerId, variableId } : null }),
+  setConnecting: (val) => set({ isConnecting: val }),
   toggleClusterVisibility: (id) =>
     set((s) => ({
       hiddenClusterIds: s.hiddenClusterIds.includes(id) ? s.hiddenClusterIds.filter((entry) => entry !== id) : [...s.hiddenClusterIds, id],
@@ -747,6 +731,14 @@ export const useStore = create((set, get) => ({
         { id: `bm-${Date.now()}`, name: name || `View ${s.bookmarks.length + 1}`, viewport, focusObjectId: s.focusedNodeId, temporary: false },
       ],
     })),
+  // Double-click flow: snapshot the *current* view as a temp bookmark first.
+  pushTemporaryBookmark: (viewport) =>
+    set((s) => ({
+      bookmarks: [
+        ...s.bookmarks,
+        { id: `tmp-${Date.now()}`, name: `↩ Return point`, viewport, focusObjectId: s.focusedNodeId, temporary: true },
+      ],
+    })),
   removeBookmark: (id) => set((s) => ({ bookmarks: s.bookmarks.filter((b) => b.id !== id) })),
 
   /* ----- creation (context menu / FAB) ----- */
@@ -756,7 +748,7 @@ export const useStore = create((set, get) => ({
       return {
         subspaces: {
           ...s.subspaces,
-          [id]: { id, name: 'New Subspace', position, size: { width: 360, height: 280 }, color: '#e08a5e', description: '', tags: [] },
+          [id]: { id, name: 'New Subspace', position, size: { width: 360, height: 280 }, color: '#10b981', description: '', tags: [] },
         },
       }
     }),
@@ -829,23 +821,44 @@ export const useStore = create((set, get) => ({
         },
       }
     }),
+  removeTuner: (id) =>
+    set((s) => {
+      const nextTunables = { ...s.tunables }
+      delete nextTunables[id]
+      const nextSelected = s.selectedTunableVariable?.tunerId === id ? null : s.selectedTunableVariable
+      return {
+        tunables: nextTunables,
+        selectedTunableVariable: nextSelected,
+      }
+    }),
   updateTunerVariableValue: (tunerId, variableId, value) =>
     set((s) => {
       const tuner = s.tunables[tunerId]
       if (!tuner) return {}
       const variable = tuner.variables.find((entry) => entry.id === variableId)
       if (!variable) return {}
-      const nextVariables = tuner.variables.map((entry) => (entry.id === variableId ? { ...entry, value } : entry))
+
+      // Update variables inside all tuner nodes displaying variables with this name
+      const nextTunables = { ...s.tunables }
+      for (const [tId, t] of Object.entries(nextTunables)) {
+        if (t.variables) {
+          nextTunables[tId] = {
+            ...t,
+            variables: t.variables.map((entry) => entry.name === variable.name ? { ...entry, value } : entry)
+          }
+        }
+      }
+
       const fileId = tuner.fileId
       const content = getFileContent(s, fileId)
       if (typeof content !== 'string' || !variable.line) {
         return {
-          tunables: {
-            ...s.tunables,
-            [tunerId]: { ...tuner, variables: nextVariables },
-          },
+          tunables: nextTunables,
         }
       }
+
+      // Update in-memory file content of the main tuner file
+      const nextFileEdits = { ...s.fileEdits }
       const lines = content.split(/\r?\n/)
       const lineIndex = variable.line - 1
       const currentLine = lines[lineIndex] || ''
@@ -857,54 +870,36 @@ export const useStore = create((set, get) => ({
         return full
       })
       lines[lineIndex] = updatedLine
-      return {
-        tunables: {
-          ...s.tunables,
-          [tunerId]: { ...tuner, variables: nextVariables },
-        },
-        fileEdits: { ...s.fileEdits, [fileId]: lines.join('\n') },
-      }
-    }),
-  /* Search EVERY text file in the project and reassign each tuner variable to
-   * its value (across JS/TS/Python/C++/…), then persist the touched files.
-   * Returns a summary so the UI can report what changed. */
-  commitTuner: async (tunerId) => {
-    const state = get()
-    const tuner = state.tunables[tunerId]
-    if (!tuner) return { changedFiles: 0, changedCount: 0 }
-    const vars = (tuner.variables || []).filter((v) => v.name && v.value !== '' && v.value != null)
-    if (vars.length === 0) return { changedFiles: 0, changedCount: 0 }
+      nextFileEdits[fileId] = lines.join('\n')
 
-    const edits = {}
-    let changedCount = 0
-    for (const path of Object.keys(state.projectFiles)) {
-      const file = state.projectFiles[path]
-      if (file.kind !== 'text') continue
-      let content = getFileContent(state, path)
-      if (typeof content !== 'string') continue
-      let fileChanged = false
-      for (const variable of vars) {
-        const res = setVariableEverywhere(content, variable.name, String(variable.value))
-        if (res.count > 0) {
-          content = res.content
-          changedCount += res.count
-          fileChanged = true
+      // Sync other project files that define a tunable with the same name
+      for (const [otherFileId, otherFile] of Object.entries(s.projectFiles)) {
+        if (otherFileId === fileId) continue
+        const otherContent = getFileContent(s, otherFileId)
+        if (typeof otherContent !== 'string') continue
+        const otherVars = parseTunableVariables(otherContent, otherFileId)
+        const matchingVar = otherVars.find((v) => v.name === variable.name)
+        if (matchingVar && matchingVar.line) {
+          const otherLines = otherContent.split(/\r?\n/)
+          const oLineIndex = matchingVar.line - 1
+          const oLine = otherLines[oLineIndex] || ''
+          const updatedOLine = oLine.replace(/(\b(?:variable\.name|\w+)\b\s*=\s*)([^/\n]+?)(\s*(?:\/\/.*)?)$/, (full, prefix, _oldValue, suffix) => {
+            const matchedName = variable.name
+            if (new RegExp(`\\b${escapeRegExp(matchedName)}\\b`).test(oLine)) {
+              return `${prefix}${value}${suffix}`
+            }
+            return full
+          })
+          otherLines[oLineIndex] = updatedOLine
+          nextFileEdits[otherFileId] = otherLines.join('\n')
         }
       }
-      if (fileChanged) edits[path] = content
-    }
 
-    const changedPaths = Object.keys(edits)
-    if (changedPaths.length === 0) return { changedFiles: 0, changedCount: 0 }
-
-    // Stage all edits at once, then flush each through the normal save path
-    // (in-memory locally, or Supabase when configured).
-    set((s) => ({ fileEdits: { ...s.fileEdits, ...edits } }))
-    for (const path of changedPaths) {
-      await get().saveProjectFile(path)
-    }
-    return { changedFiles: changedPaths.length, changedCount }
-  },
+      return {
+        tunables: nextTunables,
+        fileEdits: nextFileEdits,
+      }
+    }),
   createFile: (position, folderPath) =>
     set((s) => {
       const id = `file-${Date.now()}`
@@ -999,3 +994,6 @@ export function getFileContent(state, path) {
   if (projectFile?.source) return projectFile.source
   return FILE_SOURCE[path] ?? ''
 }
+
+const threshold = 4 //TUNABLE
+

@@ -11,7 +11,7 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 
-import { useStore, getProjectFocus, getFileContent } from '../store'
+import { useStore, getProjectFocus, getFileContent, parseTunableVariables } from '../store'
 import { parseFunctions } from '../projectGraph'
 import ClusterNode from './nodes/ClusterNode'
 import ProjectFileNode from './nodes/ProjectFileNode'
@@ -46,7 +46,7 @@ function makeEdge(source, target, color, opts = {}) {
     type: 'around', // route around node bodies (see AroundEdge)
     animated: true,
     className: 'focus-edge',
-    zIndex: 5, // tucked BEHIND the file/tuner cards (z 10/12) so the line never paints over a file face — it only shows in the open gaps and re-emerges at each card's edge. Still above the folder (0) / subspace (1) backdrops, and below the ƒ pills (1000).
+    zIndex: 2000, // render arrows ON TOP of file nodes (z 2) and function pills (z 1000)
     style: { stroke: color, strokeWidth: 2 },
     markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
     data: { lane: opts.lane ?? 0, bow: opts.bow ?? 'down' },
@@ -76,6 +76,8 @@ function Flow() {
   const setSelectedTunableVariable = useStore((s) => s.setSelectedTunableVariable)
   const selectProjectFile = useStore((s) => s.selectProjectFile)
   const clearProjectSelection = useStore((s) => s.clearProjectSelection)
+  const isConnecting = useStore((s) => s.isConnecting)
+  const setConnecting = useStore((s) => s.setConnecting)
 
   // --- shared actions ---
   const moveNode = useStore((s) => s.moveNode)
@@ -106,10 +108,15 @@ function Flow() {
 
   /* ---------- Escape clears the selection ---------- */
   useEffect(() => {
-    const onKeyDown = (e) => e.key === 'Escape' && clearProjectSelection()
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        clearProjectSelection()
+        setConnecting(false)
+      }
+    }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [clearProjectSelection])
+  }, [clearProjectSelection, setConnecting])
 
   /* ---------- redirect the map to a file (explorer / search) ---------- */
   useEffect(() => {
@@ -152,7 +159,7 @@ function Flow() {
         data: f,
         selected: selectedFileIds.includes(f.id),
         style: { width: FILE_W, height: FILE_H },
-        zIndex: 10, // above the dependency arrows (z 5) so the line tucks behind each card
+        zIndex: 2,
       })
     }
 
@@ -180,8 +187,8 @@ function Flow() {
         type: 'tunable',
         position: tuner.position,
         data: { ...tuner },
-        style: { width: tuner.width ?? 260, height: tuner.height ?? 180, zIndex: 12 },
-        zIndex: 12, // above files (10) and the arrows beneath them
+        style: { width: tuner.width ?? 260, height: tuner.height ?? 180, zIndex: 3 },
+        zIndex: 3,
         selectable: true,
       })
     }
@@ -221,10 +228,53 @@ function Flow() {
     if (projectFolderFilter && selectedIds.every((id) => !visibleIds.has(id))) return []
     const edgeIds = new Set()
     const E = []
-    // Lanes are counted per direction so each fan (down/up) spreads from 0 and
-    // stays symmetric instead of sharing one ever-growing offset.
-    let downLane = 0
-    let upLane = 0
+
+    // 1. ALWAYS draw connection lines for all tunables to their target files
+    for (const tuner of Object.values(tunables)) {
+      if (tuner.fileId && visibleIds.has(tuner.fileId)) {
+        const key = `${tuner.id}-${tuner.fileId}`
+        if (!edgeIds.has(key)) {
+          edgeIds.add(key)
+          E.push({
+            id: key,
+            source: tuner.id,
+            target: tuner.fileId,
+            animated: true,
+            style: { stroke: '#f59e0b', strokeWidth: 2.25 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: '#f59e0b', width: 14, height: 14 },
+            className: 'focus-edge',
+          })
+        }
+      }
+      
+      if (tuner.variables) {
+        for (const variable of tuner.variables) {
+          const varName = variable.name
+          for (const f of Object.values(projectFiles)) {
+            if (f.id === tuner.fileId || f.kind !== 'text') continue
+            const content = getFileContent(useStore.getState(), f.id)
+            const otherVars = parseTunableVariables(content, f.id)
+            if (otherVars.some((v) => v.name === varName)) {
+              const key = `${tuner.id}-${f.id}`
+              if (!edgeIds.has(key)) {
+                edgeIds.add(key)
+                E.push({
+                  id: key,
+                  source: tuner.id,
+                  target: f.id,
+                  animated: true,
+                  style: { stroke: '#f59e0b', strokeWidth: 2.25 },
+                  markerEnd: { type: MarkerType.ArrowClosed, color: '#f59e0b', width: 14, height: 14 },
+                  className: 'focus-edge',
+                })
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Draw file import dependencies and file-sharing connection lines when selected/clicked
     for (const id of selectedIds) {
       if (!visibleIds.has(id)) continue
       for (const e of projectEdges) {
@@ -232,22 +282,51 @@ function Flow() {
           const key = `${e.source}-${e.target}`
           if (!edgeIds.has(key)) {
             edgeIds.add(key)
-            E.push(makeEdge(e.source, e.target, DOWNSTREAM_COLOR, { lane: downLane++, bow: 'down' }))
+            E.push(makeEdge(e.source, e.target, DOWNSTREAM_COLOR, { lane: E.length, bow: 'down' }))
           }
         }
         if (e.target === id && visibleIds.has(e.source)) {
           const key = `${e.source}-${e.target}`
           if (!edgeIds.has(key)) {
             edgeIds.add(key)
-            E.push(makeEdge(e.source, e.target, UPSTREAM_COLOR, { lane: upLane++, bow: 'up' }))
+            E.push(makeEdge(e.source, e.target, UPSTREAM_COLOR, { lane: E.length, bow: 'up' }))
+          }
+        }
+      }
+
+      // Draw lines for tunables defined in the selected file to other files sharing this tunable
+      const content = getFileContent(useStore.getState(), id)
+      const fileVars = parseTunableVariables(content, id)
+      for (const variable of fileVars) {
+        const varName = variable.name
+        for (const f of Object.values(projectFiles)) {
+          if (f.id === id || f.kind !== 'text') continue
+          const otherContent = getFileContent(useStore.getState(), f.id)
+          const otherVars = parseTunableVariables(otherContent, f.id)
+          if (otherVars.some((v) => v.name === varName)) {
+            const key = `tunable-share-${id}-${f.id}`
+            if (!edgeIds.has(key)) {
+              edgeIds.add(key)
+              E.push({
+                id: key,
+                source: id,
+                target: f.id,
+                animated: true,
+                style: { stroke: '#f59e0b', strokeWidth: 2.25 },
+                markerEnd: { type: MarkerType.ArrowClosed, color: '#f59e0b', width: 14, height: 14 },
+                className: 'focus-edge',
+              })
+            }
           }
         }
       }
     }
+
+    // 3. Draw edge from tuner to the origin function node of selected tunable variable
     if (selectedTunableVariable?.tunerId && selectedTunableVariable?.variableId) {
       const tuner = tunables[selectedTunableVariable.tunerId]
       const variable = tuner?.variables?.find((entry) => entry.id === selectedTunableVariable.variableId)
-      if (tuner && variable?.originFunctionNodeId) {
+      if (tuner && variable && variable.originFunctionNodeId) {
         const key = `${tuner.id}-${variable.originFunctionNodeId}`
         if (!edgeIds.has(key)) {
           edgeIds.add(key)
@@ -256,7 +335,6 @@ function Flow() {
             source: tuner.id,
             target: variable.originFunctionNodeId,
             animated: true,
-            zIndex: 5,
             style: { stroke: '#f59e0b', strokeWidth: 2.25 },
             markerEnd: { type: MarkerType.ArrowClosed, color: '#f59e0b', width: 14, height: 14 },
             className: 'focus-edge',
@@ -303,7 +381,8 @@ function Flow() {
     clearProjectSelection()
     setSelectedTunableVariable(null, null)
     setMenu(null)
-  }, [clearFocus, clearProjectSelection, setSelectedTunableVariable])
+    setConnecting(false)
+  }, [clearFocus, clearProjectSelection, setSelectedTunableVariable, setConnecting])
 
   /* ---------- context menu (creation — function mode only) */
   const onPaneContextMenu = useCallback(
@@ -340,13 +419,22 @@ function Flow() {
   }
 
   const handleConnect = () => {
-    const selectedId = selectedProjectFileId || (selectedFileIds[0] ?? null)
-    if (!selectedId) return
-    const bounds = wrapperRef.current?.getBoundingClientRect()
-    if (!bounds) return
-    const flowPos = rf.screenToFlowPosition({ x: bounds.width / 2 + 140, y: bounds.height / 2 - 140 })
-    createTunerFromFile(selectedId, flowPos)
+    setConnecting(true)
   }
+
+  const onNodeClick = useCallback(
+    (event, node) => {
+      const st = useStore.getState()
+      if (st.isConnecting && node.type === 'projectFile') {
+        event.preventDefault()
+        event.stopPropagation()
+        const flowPos = rf.screenToFlowPosition({ x: event.clientX + 50, y: event.clientY - 50 })
+        createTunerFromFile(node.id, flowPos)
+        setConnecting(false)
+      }
+    },
+    [rf, createTunerFromFile, setConnecting]
+  )
 
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -367,6 +455,13 @@ function Flow() {
 
   return (
     <div ref={wrapperRef} className="relative h-full w-full">
+      {isConnecting && (
+        <div className="pointer-events-none absolute inset-x-0 top-20 z-20 flex justify-center">
+          <div className="rounded-full bg-cyan-950/90 border border-cyan-500 px-4 py-1.5 text-xs font-semibold text-cyan-300 shadow-xl animate-pulse">
+            🛈 Click on a file node to create its tuner
+          </div>
+        </div>
+      )}
       {/* ---------- TOP OVERLAY: search + save view ---------- */}
       <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
         <div className="pointer-events-auto flex items-center gap-2">
@@ -400,10 +495,14 @@ function Flow() {
             <span>⊞</span> Create subspace
           </button>
           <button
-            onClick={handleConnect}
-            className="flex items-center gap-1.5 rounded-full border border-cyan-500/60 bg-cyan-600/90 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-cyan-500"
+            onClick={isConnecting ? () => setConnecting(false) : handleConnect}
+            className={`flex items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-medium text-white shadow-lg transition-all ${
+              isConnecting
+                ? 'border-rose-500/80 bg-rose-600 animate-pulse hover:bg-rose-500'
+                : 'border-cyan-500/60 bg-cyan-600/90 hover:bg-cyan-500'
+            }`}
           >
-            <span>⤓</span> Connect
+            <span>⤓</span> {isConnecting ? 'Cancel Connecting' : 'Connect'}
           </button>
           <button
             onClick={handleSaveView}
@@ -423,6 +522,7 @@ function Flow() {
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
+        onNodeClick={onNodeClick}
         minZoom={0.1}
         maxZoom={3}
         fitView
@@ -472,18 +572,20 @@ function Flow() {
 
       {/* ---------- LEGEND ---------- */}
       <div className="pointer-events-none absolute bottom-6 left-6 z-20 rounded-xl border border-slate-700 bg-slate-900/90 px-3 py-2 text-[11px] shadow-lg backdrop-blur">
-        <div className="mb-1.5 font-semibold text-slate-300">Click a file to see how it connects</div>
+        <div className="mb-1 font-semibold text-slate-300">Click a file → trace deps · its ƒ functions · open IDE</div>
         <div className="flex items-center gap-2 text-slate-400">
-          <span className="inline-block h-0.5 w-5" style={{ background: DOWNSTREAM_COLOR }} /> → files it uses
+          <span className="inline-block h-0.5 w-5" style={{ background: DOWNSTREAM_COLOR }} /> affects (imports) →
         </div>
         <div className="flex items-center gap-2 text-slate-400">
-          <span className="inline-block h-0.5 w-5" style={{ background: UPSTREAM_COLOR }} /> ← files that use it
+          <span className="inline-block h-0.5 w-5" style={{ background: UPSTREAM_COLOR }} /> ← affected by (imported by)
         </div>
-        <div className="mt-1.5 text-slate-500">Double-click to open · scroll to zoom · right-drag to move around</div>
+        <div className="mt-1 text-slate-500">drag = select box · Ctrl/⌘+click = multi · drag a selected file = move the group · right/middle-drag = pan</div>
       </div>
     </div>
   )
 }
+
+const threshold = 4 //TUNABLE
 
 /* =============================================================================
  *  PUBLIC WRAPPER
